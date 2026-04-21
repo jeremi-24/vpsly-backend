@@ -8,31 +8,37 @@ use App\Http\Controllers\DeploymentController;
 
 // Si vous utilisez Sanctum avec Auth : Route::middleware('auth:sanctum')->get('/user', function () { ... });
 
-// MVP API Endpoints sans middleware "auth" complexe externe pour simplifier les appels POST du End-User.
-// Dans un vrai SaaS, vous engloberiez ça dans un middleware auth:sanctum
-Route::prefix('servers')->group(function () {
-    Route::get('/', [ServerController::class, 'index']);
-    Route::post('/', [ServerController::class, 'store']);
-});
-
-Route::prefix('applications')->group(function () {
-    Route::get('/', [ApplicationController::class, 'index']);
-    Route::post('/', [ApplicationController::class, 'store']);
-});
-
-Route::prefix('deployments')->group(function () {
-    Route::post('/', [DeploymentController::class, 'store']);
-    Route::get('/{id}/status', [DeploymentController::class, 'status']);
-    Route::get('/{id}/logs', [DeploymentController::class, 'logs']);
-});
-
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
+
     Route::post('/logout', function (Request $request) {
         $request->user()->currentAccessToken()->delete();
         return response()->json(['message' => 'Logged out']);
+    });
+
+    // Gestion des Serveurs
+    Route::prefix('servers')->group(function () {
+        Route::get('/', [ServerController::class, 'index']);
+        Route::post('/', [ServerController::class, 'store']);
+        Route::get('/{server}', [ServerController::class, 'show']);
+        Route::put('/{server}', [ServerController::class, 'update']);
+        Route::delete('/{server}', [ServerController::class, 'destroy']);
+        Route::post('/{server}/test-connection', [ServerController::class, 'testConnection']);
+    });
+
+    // Gestion des Applications
+    Route::prefix('applications')->group(function () {
+        Route::get('/', [ApplicationController::class, 'index']);
+        Route::post('/', [ApplicationController::class, 'store']);
+    });
+
+    // Déploiements
+    Route::prefix('deployments')->group(function () {
+        Route::post('/', [DeploymentController::class, 'store']);
+        Route::get('/{id}/status', [DeploymentController::class, 'status']);
+        Route::get('/{id}/logs', [DeploymentController::class, 'logs']);
     });
 });
 
