@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    networks:
+      - vpsly_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.{{APP_NAME}}.rule=Host(`{{DOMAIN}}`)"
+      - "traefik.http.services.{{APP_NAME}}.loadbalancer.server.port=80"
+
+networks:
+  vpsly_network:
+    external: true

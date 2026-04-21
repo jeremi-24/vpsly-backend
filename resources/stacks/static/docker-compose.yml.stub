@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    networks:
+      - vpsly_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.{{APP_NAME}}.rule=Host(`{{DOMAIN}}`)"
+      # Note : un projet static expose par defaut le port 80 depuis Nginx
+
+networks:
+  vpsly_network:
+    external: true
