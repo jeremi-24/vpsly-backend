@@ -40,10 +40,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{id}/status', [DeploymentController::class, 'status']);
         Route::get('/{id}/logs', [DeploymentController::class, 'logs']);
     });
+
+    // Intégration GitHub
+    Route::prefix('github')->group(function () {
+        Route::get('/auth/redirect', [\App\Http\Controllers\Api\GitHubApiController::class, 'redirect']);
+        Route::get('/user', [\App\Http\Controllers\Api\GitHubApiController::class, 'user']);
+        Route::get('/repositories', [\App\Http\Controllers\Api\GitHubApiController::class, 'repositories']);
+        Route::get('/branches', [\App\Http\Controllers\Api\GitHubApiController::class, 'branches']);
+    });
 });
 
-Route::prefix('github')->group(function () {
-    Route::get('/user', [\App\Http\Controllers\Api\GitHubApiController::class, 'user']);
-    Route::get('/repositories', [\App\Http\Controllers\Api\GitHubApiController::class, 'repositories']);
-    Route::get('/branches', [\App\Http\Controllers\Api\GitHubApiController::class, 'branches']);
-});
+Route::get('/github/auth/callback', [\App\Http\Controllers\Api\GitHubApiController::class, 'callback']);

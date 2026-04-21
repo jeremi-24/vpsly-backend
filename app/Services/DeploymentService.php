@@ -43,11 +43,17 @@ class DeploymentService
             $this->git->clone($app->repo_url, $app->branch, $appPath, $app->user->github_token);
             $log("Repository cloned successfully.");
 
-            // 4. Generation Docker Compose
+            // 4. Generation Docker files
             $log("Detecting application stack (resolving template)...");
             $stack = $this->docker->detectStack($appPath);
             $log("Stack detected: " . strtoupper($stack));
 
+            // Dockerfile
+            $dockerfileContent = $this->docker->generateDockerfile($stack);
+            $this->docker->writeDockerfile($appPath, $dockerfileContent);
+            $log("Dockerfile injected on VPS.");
+
+            // Docker Compose
             $composeContent = $this->docker->generateCompose($app, $stack);
             $this->docker->writeCompose($appPath, $composeContent);
             $log("docker-compose.yml injected on VPS.");
@@ -55,7 +61,6 @@ class DeploymentService
             // 5. Docker Run & Stream logs
             $log("Building and starting Docker container(s)...");
             $this->docker->up($appPath, function(string $streamLine) use ($log) {
-                // Stream direct des logs de docker-compose vers Reverb et DB
                 $log($streamLine);
             });
 

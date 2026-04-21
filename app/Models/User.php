@@ -12,8 +12,8 @@ use Illuminate\Notifications\Notifiable;
 
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'google_id', 'avatar', 'google_token', 'github_id', 'github_nickname', 'github_token'])]
-#[Hidden(['password', 'remember_token', 'google_token', 'github_token'])]
+#[Fillable(['name', 'email', 'password', 'github_id', 'github_token', 'github_refresh_token'])]
+#[Hidden(['password', 'remember_token', 'github_token', 'github_refresh_token'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -29,6 +29,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'github_token' => 'encrypted',
+            'github_refresh_token' => 'encrypted',
         ];
     }
 }

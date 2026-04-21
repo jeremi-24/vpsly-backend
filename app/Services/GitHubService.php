@@ -61,6 +61,7 @@ class GitHubService
         }
 
         $response = Http::withToken($user->github_token)
+            ->withHeaders(['User-Agent' => 'VPSly-DeployKit'])
             ->get("{$this->baseUrl}/user");
 
         return $response->json();

@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: {{APP_NAME}}
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - APP_ENV=production
+      # {{APP_ENV_VARS}}
+    networks:
+      - traefik_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.{{APP_ID}}.rule=Host(`{{DOMAIN}}`)"
+      - "traefik.http.routers.{{APP_ID}}.entrypoints=web"
+      - "traefik.http.services.{{APP_ID}}.loadbalancer.server.port={{APP_PORT}}"
+
+networks:
+  traefik_network:
+    external: true
