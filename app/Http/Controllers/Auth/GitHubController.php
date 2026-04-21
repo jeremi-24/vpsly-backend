@@ -8,6 +8,8 @@ use Exception;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Socialite\Facades\Socialite;
 
+use App\Services\AuthService;
+
 class GitHubController extends Controller
 {
     /**
@@ -23,39 +25,21 @@ class GitHubController extends Controller
     /**
      * Gère le retour de GitHub.
      */
-    public function handleGithubCallback()
+    public function handleGithubCallback(AuthService $authService)
     {
         try {
-            $githubUser = Socialite::driver('github')->user();
+            $driver = Socialite::driver('github');
+
+            // Patch pour le développement local
+            if (app()->environment('local')) {
+                $driver->setHttpClient(new \GuzzleHttp\Client(['verify' => false]));
+            }
+
+            $socialUser = $driver->user();
             
-            // Si l'utilisateur est déjà connecté, on lie son compte
-            // Sinon on essaie de trouver par email ou on crée
-            $user = Auth::user() ?? User::where('email', $githubUser->email)->first();
+            $result = $authService->handleOAuthUser($socialUser, 'github');
 
-            if (!$user) {
-                $user = User::create([
-                    'name' => $githubUser->name ?? $githubUser->nickname,
-                    'email' => $githubUser->email,
-                    'password' => bcrypt(str()->random(24)),
-                ]);
-            }
-
-            $user->update([
-                'github_id' => $githubUser->id,
-                'github_nickname' => $githubUser->nickname,
-                'github_token' => $githubUser->token,
-            ]);
-
-            if (!Auth::check()) {
-                Auth::login($user);
-            }
-
-            // Génération du token pour le dashboard
-            $token = $user->createToken('vpsly-auth-token')->plainTextToken;
-
-            $dashboardUrl = config('app.frontend_url', 'http://localhost:5173') . '/auth/callback?token=' . $token;
-
-            return redirect($dashboardUrl);
+            return redirect($authService->buildRedirect($result['token']));
 
         } catch (Exception $e) {
             return response()->json([

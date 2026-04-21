@@ -8,6 +8,8 @@ use Exception;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Socialite\Facades\Socialite;
 
+use App\Services\AuthService;
+
 class GoogleController extends Controller
 {
     /**
@@ -21,33 +23,21 @@ class GoogleController extends Controller
     /**
      * Gère le retour de Google.
      */
-    public function handleGoogleCallback()
+    public function handleGoogleCallback(AuthService $authService)
     {
         try {
-            $googleUser = Socialite::driver('google')->user();
+            $driver = Socialite::driver('google');
+
+            // Patch pour le développement local
+            if (app()->environment('local')) {
+                $driver->setHttpClient(new \GuzzleHttp\Client(['verify' => false]));
+            }
+
+            $socialUser = $driver->user();
             
-            $user = User::updateOrCreate([
-                'email' => $googleUser->email,
-            ], [
-                'name' => $googleUser->name,
-                'google_id' => $googleUser->id,
-                'avatar' => $googleUser->avatar,
-                'google_token' => $googleUser->token,
-                // On ne touche pas au mot de passe s'il existe déjà
-                // S'il n'existe pas (création), on peut mettre un truc aléatoire inutilisable
-                'password' => $googleUser->password ?? bcrypt(str()->random(24)),
-            ]);
+            $result = $authService->handleOAuthUser($socialUser, 'google');
 
-            Auth::login($user);
-
-            // Génération du token Sanctum pour le frontend
-            $token = $user->createToken('vpsly-auth-token')->plainTextToken;
-
-            // Redirection vers le dashboard (vpsly-dashboard) avec le token
-            // NB: En production, on passera par une URL sécurisée ou un cookie
-            $dashboardUrl = config('app.frontend_url', 'http://localhost:5173') . '/auth/callback?token=' . $token;
-
-            return redirect($dashboardUrl);
+            return redirect($authService->buildRedirect($result['token']));
 
         } catch (Exception $e) {
             return response()->json([

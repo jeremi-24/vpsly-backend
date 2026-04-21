@@ -26,6 +26,16 @@ Route::prefix('deployments')->group(function () {
     Route::get('/{id}/logs', [DeploymentController::class, 'logs']);
 });
 
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/user', function (Request $request) {
+        return $request->user();
+    });
+    Route::post('/logout', function (Request $request) {
+        $request->user()->currentAccessToken()->delete();
+        return response()->json(['message' => 'Logged out']);
+    });
+});
+
 Route::prefix('github')->group(function () {
     Route::get('/user', [\App\Http\Controllers\Api\GitHubApiController::class, 'user']);
     Route::get('/repositories', [\App\Http\Controllers\Api\GitHubApiController::class, 'repositories']);
