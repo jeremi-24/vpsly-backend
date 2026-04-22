@@ -6,6 +6,7 @@ use App\Http\Controllers\ServerController;
 use App\Http\Controllers\ApplicationController;
 use App\Http\Controllers\DeploymentController;
 use App\Http\Controllers\Api\EnvironmentVariableController;
+use App\Http\Controllers\Api\ApplicationLogController;
 
 // Si vous utilisez Sanctum avec Auth : Route::middleware('auth:sanctum')->get('/user', function () { ... });
 
@@ -42,6 +43,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/bulk', [EnvironmentVariableController::class, 'bulk']);
             Route::delete('/{id}', [EnvironmentVariableController::class, 'destroy']);
             Route::get('/{id}/reveal', [EnvironmentVariableController::class, 'reveal']);
+        });
+
+        // Logs de Runtime
+        Route::prefix('{app}/logs')->group(function () {
+            Route::get('/', [ApplicationLogController::class, 'index']);
+            Route::post('/stream', [ApplicationLogController::class, 'stream']);
         });
     });
 
