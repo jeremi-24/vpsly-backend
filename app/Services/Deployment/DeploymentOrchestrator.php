@@ -142,7 +142,6 @@ class DeploymentOrchestrator
             throw $e;
 
         } finally {
-            $app->update(['is_deploying' => false]);
             $this->streamer->flush($deployment);
             $this->ssh->disconnect();
         }
@@ -239,21 +238,25 @@ class DeploymentOrchestrator
 
     protected function updateStatus(Application $app, Deployment $deployment, DeploymentStatus $status): void
     {
+        $isFinished = ($status === DeploymentStatus::SUCCESS || $status === DeploymentStatus::FAILED);
+        
         $app->update([
             'status' => $status->value,
+            'is_deploying' => !$isFinished,
             'last_deployed_at' => now()
         ]);
 
         $deployment->update([
             'status' => $status->value,
-            'finished_at' => ($status === DeploymentStatus::SUCCESS || $status === DeploymentStatus::FAILED) ? now() : null
+            'finished_at' => $isFinished ? now() : null
         ]);
 
         // Diffusion du statut en temps réel via WebSocket
         event(new \App\Events\DeploymentStatusUpdatedEvent(
             $deployment->id,
             $app->id,
-            $status->value
+            $status->value,
+            !$isFinished
         ));
     }
     /**
