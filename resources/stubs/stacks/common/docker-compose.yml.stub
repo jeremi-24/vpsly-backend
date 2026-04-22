@@ -1,22 +1,26 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: {{IMAGE_NAME}}
     container_name: {{APP_NAME}}
     restart: always
+    pull_policy: never
+    expose:
+      - "{{APP_PORT}}"
     environment:
-      - NODE_ENV=production
-      - APP_ENV=production
-      # {{APP_ENV_VARS}}
+{{ENVIRONMENT}}
     networks:
-      - traefik_network
+      - vpsly_network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.{{APP_ID}}.rule=Host(`{{DOMAIN}}`)"
-      - "traefik.http.routers.{{APP_ID}}.entrypoints=web"
+      - "traefik.http.routers.{{APP_ID}}.entrypoints=web,websecure"
+      - "traefik.http.routers.{{APP_ID}}.tls=true"
+      - "traefik.http.routers.{{APP_ID}}.tls.certresolver=letsencrypt"
       - "traefik.http.services.{{APP_ID}}.loadbalancer.server.port={{APP_PORT}}"
 
+
+
 networks:
-  traefik_network:
+  vpsly_network:
     external: true
+

@@ -13,9 +13,31 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
-class DeployApplicationJob implements ShouldQueue
+class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue, \Illuminate\Contracts\Queue\ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * Nombre de tentatives avant échec définitif.
+     */
+    public $tries = 3;
+
+    /**
+     * Temps d'attente entre chaque retry (en secondes).
+     */
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
+
+    /**
+     * Identifiant unique pour éviter les déploiements concurrents d'une même app.
+     */
+    public function uniqueId(): string
+    {
+        return (string) $this->deploymentId; // ID du déploiement ou de l'app ?
+        // On préfère l'ID du déploiement car le controller rejette déjà via is_deploying.
+    }
 
     /**
      * Timeout pour le job en secondes, car un docker build peut être long.
@@ -26,43 +48,23 @@ class DeployApplicationJob implements ShouldQueue
         public int $deploymentId
     ) {}
 
-    public function handle(DeploymentService $deploymentService): void
+    public function handle(\App\Services\Deployment\DeploymentOrchestrator $orchestrator): void
     {
-        $deployment = Deployment::with(['application.server'])->findOrFail($this->deploymentId);
+        $deployment = Deployment::with(['application.user', 'application.server'])->findOrFail($this->deploymentId);
         
-        // Anti-skip strict de la State Machine : on ne traite que les status 'pending'
-        if ($deployment->status !== 'pending') {
+        // Anti-skip : on ne traite que les status 'pending' au démarrage (sécurité supplémentaire)
+        if ($deployment->status !== \App\Enums\DeploymentStatus::PENDING->value && $this->attempts() === 1) {
             return;
         }
 
-        // Transition pending -> running
-        $deployment->update([
-            'status' => 'running',
-            'started_at' => now(),
-        ]);
-
         try {
-            $app = $deployment->application;
-            $server = $app->server;
-            
-            // Lancement du flow orchestre (throws Exception on fail)
-            $deploymentService->deploy($app, $server, $deployment);
-            
-            // Transition running -> success
-            $deployment->update([
-                'status' => 'success',
-                'finished_at' => now(),
-            ]);
-
-        } catch (Exception $e) {
-            // Transition running -> failed
-            $deployment->update([
-                'status' => 'failed',
-                'finished_at' => now(),
-            ]);
-            
-            // On s'assure d'échouer le job dans la queue Laravel
+            $orchestrator->deploy($deployment->application, $deployment->application->server, $deployment);
+        } catch (\App\Exceptions\Deployment\NonRetryableException $e) {
+            // En cas d'erreur non-retryable (Docker build, config incorrecte), on échoue immédiatement.
             $this->fail($e);
+        } catch (\Exception $e) {
+             // En cas d'erreur temporaire (SSH timeout, réseau), Laravel retentera (tries = 3).
+            throw $e;
         }
     }
 }

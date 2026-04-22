@@ -33,6 +33,7 @@ class ApplicationController extends Controller
 
         $user = auth()->user() ?? User::first();
 
+        // Création de l'app si elle n'existe pas (le validator gère l'unique:name)
         $app = Application::create([
             'user_id' => $user->id,
             'server_id' => $request->server_id,
@@ -41,6 +42,7 @@ class ApplicationController extends Controller
             'branch' => $request->branch ?? 'main',
             'domain' => $request->domain,
             'status' => 'pending',
+            'is_deploying' => false,
         ]);
 
         // Création du déploiement initial
@@ -54,7 +56,22 @@ class ApplicationController extends Controller
 
         return response()->json([
             'message' => 'Application créée avec succès. Déploiement en cours...',
-            'application' => $app->load('server')
+            'application' => $app->load('server'),
+            'deployment_id' => $deployment->id
         ], 201);
+
+    }
+
+    public function show($id)
+    {
+        $user = auth()->user() ?? \App\Models\User::first();
+        $app = Application::with(['server', 'deployments' => function($q) {
+            $q->latest()->limit(1)->with('logs');
+        }])
+        ->where('user_id', $user->id)
+        ->findOrFail($id);
+
+        return response()->json($app);
     }
 }
+

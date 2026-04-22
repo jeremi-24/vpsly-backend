@@ -52,9 +52,9 @@ class GitHubService
     }
 
     /**
-     * Récupère les infos du profil GitHub.
+     * Récupère le contenu d'un répertoire (par défaut la racine).
      */
-    public function getUserInfo(User $user)
+    public function getRepositoryContents(User $user, string $owner, string $repo, string $path = '')
     {
         if (!$user->github_token) {
             throw new Exception("Compte GitHub non connecté.");
@@ -62,7 +62,11 @@ class GitHubService
 
         $response = Http::withToken($user->github_token)
             ->withHeaders(['User-Agent' => 'VPSly-DeployKit'])
-            ->get("{$this->baseUrl}/user");
+            ->get("{$this->baseUrl}/repos/{$owner}/{$repo}/contents/{$path}");
+
+        if (!$response->successful()) {
+            throw new Exception("Erreur GitHub API (Contents) : " . $response->body());
+        }
 
         return $response->json();
     }

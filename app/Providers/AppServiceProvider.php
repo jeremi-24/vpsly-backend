@@ -11,8 +11,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(\App\Services\Deployment\SSHService::class);
     }
+
 
     /**
      * Bootstrap any application services.

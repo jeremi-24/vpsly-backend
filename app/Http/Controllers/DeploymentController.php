@@ -17,6 +17,26 @@ class DeploymentController extends Controller
 
         $app = Application::findOrFail($request->application_id);
 
+        // Anti-concurrence : On rejette si un déploiement est déjà en cours
+        if ($app->is_deploying) {
+            $deployment = Deployment::create([
+                'application_id' => $app->id,
+                'status' => 'failed',
+                'finished_at' => now(),
+            ]);
+            
+            \App\Models\DeploymentLog::create([
+                'deployment_id' => $deployment->id,
+                'line' => 'Deployment locked: Another process is already running for this application.',
+                'type' => 'error'
+            ]);
+
+            return response()->json([
+                'message' => 'Un déploiement est déjà en cours pour cette application.',
+                'deployment' => $deployment
+            ], 422);
+        }
+
         // 1. Initialisation de la State Machine
         $deployment = Deployment::create([
             'application_id' => $app->id,

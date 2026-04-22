@@ -32,7 +32,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('applications')->group(function () {
         Route::get('/', [ApplicationController::class, 'index']);
         Route::post('/', [ApplicationController::class, 'store']);
+        Route::get('/{id}', [ApplicationController::class, 'show']);
     });
+
 
     // Déploiements
     Route::prefix('deployments')->group(function () {
