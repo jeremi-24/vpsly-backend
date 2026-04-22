@@ -37,10 +37,39 @@ class EnvironmentVariableController extends Controller
 
         $data = $request->validate([
             'key' => ['required', 'string', 'max:255', 'regex:/^[A-Z0-9_]+$/'],
-            'value' => 'required|string',
+            'value' => 'nullable|string',
             'is_secret' => 'boolean',
         ]);
 
+        $this->upsertVariable($application, $data);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    public function bulk(Request $request, Application $application)
+    {
+        if ($application->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'variables' => 'required|array',
+            'variables.*.key' => ['required', 'string', 'max:255', 'regex:/^[A-Z0-9_]+$/'],
+            'variables.*.value' => 'nullable|string',
+            'variables.*.is_secret' => 'boolean',
+        ]);
+
+        \DB::transaction(function () use ($application, $data) {
+            foreach ($data['variables'] as $v) {
+                $this->upsertVariable($application, $v);
+            }
+        });
+
+        return response()->json(['status' => 'ok', 'count' => count($data['variables'])]);
+    }
+
+    protected function upsertVariable(Application $application, array $data)
+    {
         // Upsert avec gestion des soft deletes
         $variable = EnvironmentVariable::withTrashed()
             ->where('application_id', $application->id)
@@ -50,7 +79,7 @@ class EnvironmentVariableController extends Controller
         if ($variable) {
             $variable->restore();
             $variable->update([
-                'value' => $data['value'],
+                'value' => $data['value'] ?? '',
                 'is_secret' => $data['is_secret'] ?? true,
                 'version' => $variable->version + 1,
                 'updated_by' => Auth::id(),
@@ -59,14 +88,12 @@ class EnvironmentVariableController extends Controller
             EnvironmentVariable::create([
                 'application_id' => $application->id,
                 'key' => $data['key'],
-                'value' => $data['value'],
+                'value' => $data['value'] ?? '',
                 'is_secret' => $data['is_secret'] ?? true,
                 'version' => 1,
                 'updated_by' => Auth::id(),
             ]);
         }
-
-        return response()->json(['status' => 'ok']);
     }
 
     public function destroy(Application $application, $id)

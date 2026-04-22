@@ -39,6 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::prefix('{application}/env-vars')->group(function () {
             Route::get('/', [EnvironmentVariableController::class, 'index']);
             Route::post('/', [EnvironmentVariableController::class, 'store']);
+            Route::post('/bulk', [EnvironmentVariableController::class, 'bulk']);
             Route::delete('/{id}', [EnvironmentVariableController::class, 'destroy']);
             Route::get('/{id}/reveal', [EnvironmentVariableController::class, 'reveal']);
         });

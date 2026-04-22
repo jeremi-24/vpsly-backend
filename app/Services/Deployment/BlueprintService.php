@@ -78,16 +78,12 @@ class BlueprintService
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $domain = "{$appSlug}.{$serverIp}.sslip.io";
 
-        // ENVIRONMENT reste vide ici car on utilise env_file: .env dans le stub
-        $envBlock = "";
-
         $replacements = [
             '{{APP_NAME}}'  => $appSlug,
             '{{APP_ID}}'    => $app->id,
             '{{DOMAIN}}'    => $domain,
             '{{APP_PORT}}'  => $containerPort,
             '{{IMAGE_NAME}}' => $imageName,
-            '{{ENVIRONMENT}}' => $envBlock,
         ];
 
         return str_replace(array_keys($replacements), array_values($replacements), $content);
