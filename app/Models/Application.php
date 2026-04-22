@@ -32,4 +32,9 @@ class Application extends Model
     {
         return $this->hasMany(Deployment::class);
     }
+
+    public function environmentVariables(): HasMany
+    {
+        return $this->hasMany(EnvironmentVariable::class);
+    }
 }

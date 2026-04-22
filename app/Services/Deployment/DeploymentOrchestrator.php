@@ -95,8 +95,14 @@ class DeploymentOrchestrator
             // STEP 4: DEPLOYING (Docker Compose)
             $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
             $this->streamer->log($deployment, "Génération de la configuration Docker Compose...", LogType::INFO);
+            
+            // BACKUP horodaté du .env existant (si présent)
+            $this->ssh->exec("cd \"{$appPath}\" && cp .env .env.backup.$(date +%s) 2>/dev/null || true");
 
             $this->blueprint->syncConfiguration($app, $imageName, $appPath, $nixpacksPlan);
+
+            // SÉCURISATION finale des permissions
+            $this->ssh->exec("cd \"{$appPath}\" && chown www-data:www-data .env && chmod 600 .env");
 
             $this->streamer->log($deployment, "Démarrage des conteneurs...", LogType::INFO);
 

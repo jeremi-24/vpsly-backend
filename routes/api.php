@@ -33,6 +33,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [ApplicationController::class, 'index']);
         Route::post('/', [ApplicationController::class, 'store']);
         Route::get('/{id}', [ApplicationController::class, 'show']);
+
+        // Variables d'Environnement
+        Route::prefix('{application}/env-vars')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\EnvironmentVariableController::class, 'index']);
+            Route::post('/', [\App\Http\Controllers\Api\EnvironmentVariableController::class, 'store']);
+            Route::delete('/{id}', [\App\Http\Controllers\Api\EnvironmentVariableController::class, 'destroy']);
+        });
     });
 
 

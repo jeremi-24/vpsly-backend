@@ -6,6 +6,8 @@ services:
     pull_policy: never
     expose:
       - "{{APP_PORT}}"
+    env_file:
+      - .env
     environment:
 {{ENVIRONMENT}}
     networks:

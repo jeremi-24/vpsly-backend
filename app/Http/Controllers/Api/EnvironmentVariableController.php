@@ -1,0 +1,86 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\Application;
+use App\Models\EnvironmentVariable;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class EnvironmentVariableController extends Controller
+{
+    public function index(Application $application)
+    {
+        // Sécurité : on vérifie que l'utilisateur possède l'application
+        if ($application->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        return $application->environmentVariables()
+            ->get()
+            ->map(fn ($v) => [
+                'id' => $v->id,
+                'key' => $v->key,
+                'value' => '••••••••', // Jamais exposé via l'API (Zero Leak)
+                'is_secret' => $v->is_secret,
+                'version' => $v->version,
+                'updated_at' => $v->updated_at,
+            ]);
+    }
+
+    public function store(Request $request, Application $application)
+    {
+        if ($application->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'key' => ['required', 'string', 'max:255', 'regex:/^[A-Z0-9_]+$/'],
+            'value' => 'required|string',
+            'is_secret' => 'boolean',
+        ]);
+
+        // Upsert avec gestion des soft deletes
+        $variable = EnvironmentVariable::withTrashed()
+            ->where('application_id', $application->id)
+            ->where('key', $data['key'])
+            ->first();
+
+        if ($variable) {
+            $variable->restore();
+            $variable->update([
+                'value' => $data['value'],
+                'is_secret' => $data['is_secret'] ?? true,
+                'version' => $variable->version + 1,
+                'updated_by' => Auth::id(),
+            ]);
+        } else {
+            EnvironmentVariable::create([
+                'application_id' => $application->id,
+                'key' => $data['key'],
+                'value' => $data['value'],
+                'is_secret' => $data['is_secret'] ?? true,
+                'version' => 1,
+                'updated_by' => Auth::id(),
+            ]);
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    public function destroy(Application $application, $id)
+    {
+        if ($application->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $variable = EnvironmentVariable::where('application_id', $application->id)
+            ->where('id', $id)
+            ->firstOrFail();
+
+        $variable->delete();
+
+        return response()->json(['status' => 'deleted']);
+    }
+}
