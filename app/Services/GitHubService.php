@@ -61,7 +61,7 @@ class GitHubService
         }
 
         $response = Http::withToken($user->github_token)
-            ->withHeaders(['User-Agent' => 'VPSly-DeployKit'])
+            ->withHeaders(['User-Agent' => 'VPSLY-Engine'])
             ->get("{$this->baseUrl}/repos/{$owner}/{$repo}/contents/{$path}");
 
         if (!$response->successful()) {

@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('name');
             $table->string('ip');
-            $table->string('ssh_user')->default('deploykit');
+            $table->string('ssh_user')->default('vpsly');
             $table->integer('ssh_port')->default(22);
             $table->text('ssh_private_key');
             $table->timestamps();
