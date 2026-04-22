@@ -15,6 +15,7 @@ class DeploymentOrchestrator
 {
     public function __construct(
         protected SSHService $ssh,
+        protected DockerService $docker,
         protected GitService $git,
         protected NixpacksService $nixpacks,
         protected BlueprintService $blueprint,
@@ -48,6 +49,7 @@ class DeploymentOrchestrator
             $this->ssh->connect($server);
             
             // S'assurer que les outils de base sont là
+            $this->docker->ensureInstalled($server, $deployment);
             $this->nixpacks->ensureInstalled($server, $deployment);
             $this->ensureTraefik($server, $deployment);
             
