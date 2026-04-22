@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ServerController;
 use App\Http\Controllers\ApplicationController;
 use App\Http\Controllers\DeploymentController;
+use App\Http\Controllers\Api\EnvironmentVariableController;
 
 // Si vous utilisez Sanctum avec Auth : Route::middleware('auth:sanctum')->get('/user', function () { ... });
 
@@ -36,9 +37,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Variables d'Environnement
         Route::prefix('{application}/env-vars')->group(function () {
-            Route::get('/', [\App\Http\Controllers\Api\EnvironmentVariableController::class, 'index']);
-            Route::post('/', [\App\Http\Controllers\Api\EnvironmentVariableController::class, 'store']);
-            Route::delete('/{id}', [\App\Http\Controllers\Api\EnvironmentVariableController::class, 'destroy']);
+            Route::get('/', [EnvironmentVariableController::class, 'index']);
+            Route::post('/', [EnvironmentVariableController::class, 'store']);
+            Route::delete('/{id}', [EnvironmentVariableController::class, 'destroy']);
+            Route::get('/{id}/reveal', [EnvironmentVariableController::class, 'reveal']);
         });
     });
 

@@ -83,4 +83,19 @@ class EnvironmentVariableController extends Controller
 
         return response()->json(['status' => 'deleted']);
     }
+
+    public function reveal(Application $application, $id)
+    {
+        if ($application->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $variable = EnvironmentVariable::where('application_id', $application->id)
+            ->where('id', $id)
+            ->firstOrFail();
+
+        return response()->json([
+            'value' => $variable->value // Cast 'encrypted' automatique
+        ]);
+    }
 }
