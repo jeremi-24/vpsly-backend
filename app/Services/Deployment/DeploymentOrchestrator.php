@@ -299,83 +299,66 @@ class DeploymentOrchestrator
 
     /**
      * Vérifie que Traefik est actif sur le serveur. Le lance si absent.
+     * Utilise des arguments CLI pour Traefik v3 (plus robuste que le YAML).
      */
     protected function ensureTraefik(Server $server, Deployment $deployment): void
     {
         $this->streamer->log($deployment, "🔍 Stabilisation de l'infrastructure standard (Traefik)...", LogType::DEBUG);
 
-        // 0. S'assurer que le réseau global existe
+        $baseDir = "/var/www/vpsly/traefik";
+        
+        // 0. S'assurer que les dossiers existent avec les bonnes permissions
+        $this->ssh->exec("mkdir -p \"{$baseDir}/acme\"");
+        $this->ssh->exec("touch \"{$baseDir}/acme/acme.json\" && chmod 600 \"{$baseDir}/acme/acme.json\"");
+        
+        // S'assurer que le réseau global existe
         $this->ssh->exec("docker network create vpsly_network 2>/dev/null || true");
 
-        // 1. Préparation systématique de la configuration
-        $this->ssh->exec("mkdir -p /etc/traefik/acme");
-        $this->ssh->exec("touch /etc/traefik/acme/acme.json && chmod 600 /etc/traefik/acme/acme.json");
-
-        $traefikConfig = <<<'YAML'
-entryPoints:
-  web:
-    address: ":80"
-    http:
-      redirections:
-        entryPoint:
-          to: websecure
-          scheme: https
-  websecure:
-    address: ":443"
-
-providers:
-  docker:
-    exposedByDefault: false
-    network: vpsly_network
-
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: admin@vpsly.io
-      storage: /acme/acme.json
-      httpChallenge:
-        entryPoint: web
-
-api:
-  dashboard: false
-YAML;
-
-        $base64 = base64_encode($traefikConfig);
-        $this->ssh->exec("echo '{$base64}' | base64 -d > /etc/traefik/traefik.yml");
-
-        // 2. Détection de l'état actuel (Standard name: traefik)
+        // 1. Détection de l'état actuel (Standard name: traefik)
         $check = $this->ssh->exec("docker ps --format '{{.Names}}' | grep -E '^traefik$' || true");
-        
         $isRunning = !empty(trim($check));
-        $hasCorrectNetwork = false;
         
-        if ($isRunning) {
-            $networks = $this->ssh->exec("docker inspect -f '{{json .NetworkSettings.Networks}}' traefik 2>/dev/null || echo '{}'");
-            $hasCorrectNetwork = str_contains($networks, 'vpsly_network');
-        }
+        // On vérifie si c'est déjà la version CLI avec l'API modernisée (dans l'ENV) ou s'il faut migrer
+        $env = $isRunning ? $this->ssh->exec("docker inspect traefik --format '{{range .Config.Env}}{{println .}}{{end}}'") : "";
+        $cmd = $isRunning ? $this->ssh->exec("docker inspect traefik --format '{{.Config.Cmd}}'") : "";
+        
+        $isModern = str_contains($cmd, '--providers.docker') && str_contains($env, 'DOCKER_API_VERSION=1.41');
 
-        // 3. Action corrective : Migration ou Installation
-        if (!$isRunning || !$hasCorrectNetwork) {
-            $this->streamer->log($deployment, "⚠️ Migration vers l'instance standard Traefik...", LogType::INFO);
+        // 2. Action corrective : Migration ou Installation
+        if (!$isRunning || !$isModern) {
+            $this->streamer->log($deployment, "⚠️ Migration vers l'instance standard Traefik v3 (CLI Mode)...", LogType::INFO);
             
-            // Nettoyer tous les anciens noms possibles
+            // Nettoyer tous les anciens emplacements et noms possibles
             $this->ssh->exec("docker rm -f traefik deploykit-gateway vpsly-traefik 2>/dev/null || true");
+            $this->ssh->exec("rm -f /etc/traefik/traefik.yml 2>/dev/null || true");
 
-            // Lancement du standard
-            $this->ssh->exec(implode(' ', [
+            // Lancement du standard avec les arguments optimisés pour la v3
+            $command = implode(' ', [
                 'docker run -d --name traefik --restart always',
                 '--network vpsly_network',
                 '-p 80:80 -p 443:443',
                 '-v /var/run/docker.sock:/var/run/docker.sock:ro',
-                '-v /etc/traefik/traefik.yml:/traefik.yml:ro',
-                '-v /etc/traefik/acme:/acme',
-                'traefik:v3.0',
-            ]));
+                "-v \"{$baseDir}/acme:/acme\"",
+                '-e DOCKER_API_VERSION=1.41',
+                'traefik:v3.6',
+                '--api.insecure=true',
+                '--providers.docker=true',
+                '--providers.docker.exposedbydefault=false',
+                '--providers.docker.network=vpsly_network',
+                '--entrypoints.web.address=:80',
+                '--entrypoints.web.http.redirections.entryPoint.to=websecure',
+                '--entrypoints.web.http.redirections.entryPoint.scheme=https',
+                '--entrypoints.websecure.address=:443',
+                '--certificatesresolvers.letsencrypt.acme.email=admin@vpsly.io',
+                '--certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json',
+                '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web'
+            ]);
 
+            $this->ssh->exec($command);
             sleep(2);
         } else {
-            // Déjà standard, on s'assure juste du rechargement de config
-            $this->ssh->exec("docker restart traefik");
+            // Déjà standard, on s'assure qu'il est bien démarré
+            $this->ssh->exec("docker start traefik 2>/dev/null || true");
         }
 
         $this->streamer->log($deployment, "✅ Infrastructure réseau standardisée (traefik).", LogType::SUCCESS);
