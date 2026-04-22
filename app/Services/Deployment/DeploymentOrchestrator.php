@@ -20,7 +20,8 @@ class DeploymentOrchestrator
         protected NixpacksService $nixpacks,
         protected BlueprintService $blueprint,
         protected LogStreamer $streamer
-    ) {}
+    ) {
+    }
 
     /**
      * Point d'entrée principal pour le déploiement d'une application.
@@ -42,26 +43,26 @@ class DeploymentOrchestrator
             // STEP 1: PREPARING
             Log::info("[Deploy] Step 1: Preparing status...");
             $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
-            
+
             Log::info("[Deploy] Step 1: Connecting to SSH...");
             $this->streamer->log($deployment, "Connecting to VPS {$server->ip}...", LogType::INFO);
-            
+
             $this->ssh->connect($server);
-            
+
             // S'assurer que les outils de base sont là
             $this->docker->ensureInstalled($server, $deployment);
             $this->nixpacks->ensureInstalled($server, $deployment);
             $this->ensureTraefik($server, $deployment);
-            
+
             $appPath = "/var/www/vpsly/apps/" . Str::slug($app->name);
             $this->ssh->exec("mkdir -p \"{$appPath}\"");
-            
+
             $this->streamer->log($deployment, "Connected. Workspace ready at {$appPath}", LogType::SUCCESS);
 
             // STEP 2: CLONING
             $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
             $this->streamer->log($deployment, "Synchronizing code from {$app->repo_url}...", LogType::INFO);
-            
+
             $this->git->sync($app->repo_url, $app->branch, $appPath, $app->user->github_token);
             $this->streamer->log($deployment, "Code synchronized (Branch: {$app->branch}).", LogType::SUCCESS);
 
@@ -84,26 +85,26 @@ class DeploymentOrchestrator
 
             // STEP 3: BUILDING (Nixpacks Engine)
             $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
-            
+
             // ANALYSE : On récupère le plan nixpacks pour identifier la stack
             $nixpacksPlan = $this->nixpacks->getPlan($server, $deployment, $appPath, $nodeVersion);
-            
+
             $imageName = "vpsly-app-{$app->id}";
             $this->nixpacks->build($server, $deployment, $appPath, $imageName, $nodeVersion);
 
             // STEP 4: DEPLOYING (Docker Compose)
             $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
             $this->streamer->log($deployment, "Génération de la configuration Docker Compose...", LogType::INFO);
-            
+
             $this->blueprint->syncConfiguration($app, $imageName, $appPath, $nixpacksPlan);
-            
+
             $this->streamer->log($deployment, "Démarrage des conteneurs...", LogType::INFO);
 
             $this->ssh->exec("docker network ls | grep -q 'vpsly_network' || docker network create vpsly_network");
 
             try {
                 // On n'utilise plus --build car l'image est déjà faite par Nixpacks
-                $this->ssh->stream("cd \"{$appPath}\" && docker compose up -d", function($line) use ($deployment) {
+                $this->ssh->stream("cd \"{$appPath}\" && docker compose up -d", function ($line) use ($deployment) {
                     $this->streamer->log($deployment, $line, LogType::DEBUG);
                 });
             } catch (Exception $e) {
@@ -117,14 +118,14 @@ class DeploymentOrchestrator
             // FINAL STEP: SUCCESS
             $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
             $this->streamer->log($deployment, "Les conteneurs ont démarré avec succès! Votre application est maintenant en ligne.", LogType::SUCCESS);
-            
+
             // CLEANUP
             $this->cleanup($deployment);
 
         } catch (Exception $e) {
             $msg = "CRITICAL DEPLOYMENT ERROR: " . $e->getMessage();
             $this->streamer->log($deployment, $msg, LogType::ERROR);
-            
+
             try {
                 $this->updateStatus($app, $deployment, DeploymentStatus::FAILED);
             } catch (Exception $dbEx) {
@@ -236,7 +237,7 @@ class DeploymentOrchestrator
             'status' => $status->value,
             'last_deployed_at' => now()
         ]);
-        
+
         $deployment->update([
             'status' => $status->value,
             'finished_at' => ($status === DeploymentStatus::SUCCESS || $status === DeploymentStatus::FAILED) ? now() : null
@@ -255,13 +256,13 @@ class DeploymentOrchestrator
     protected function resolveNodeVersion(string $appPath, Deployment $deployment): string
     {
         $fallbackVersion = "20"; // Node 20 est le standard de base pour les apps modernes
-        
+
         try {
             $this->streamer->log($deployment, "🔍 Détection de la version Node.js requise...", LogType::DEBUG);
-            
+
             // On lit le package.json directement sur le VPS
             $json = $this->ssh->exec("cat \"{$appPath}/package.json\" 2>/dev/null || echo 'not found'");
-            
+
             if (trim($json) === 'not found' || empty($json)) {
                 $this->streamer->log($deployment, "Fichier package.json non trouvé. Utilisation de la version par défaut (Node {$fallbackVersion}).", LogType::DEBUG);
                 return $fallbackVersion;
@@ -279,7 +280,7 @@ class DeploymentOrchestrator
             // Supporte: ">=20.9.0", "^18.0.0", "16.x", "14" etc.
             if (preg_match('/(\d+)(?:\.\d+)*/', $enginesNode, $matches)) {
                 $version = $matches[1];
-                
+
                 // Sécurité : Si la version détectée est < 18, on conseille 20
                 if (intval($version) < 18) {
                     $this->streamer->log($deployment, "⚠️ Version Node {$version} détectée (trop ancienne). Forçage vers Node {$fallbackVersion} pour stabilité.", LogType::DEBUG);
@@ -306,28 +307,28 @@ class DeploymentOrchestrator
         $this->streamer->log($deployment, "🔍 Stabilisation de l'infrastructure standard (Traefik)...", LogType::DEBUG);
 
         $baseDir = "/var/www/vpsly/traefik";
-        
+
         // 0. S'assurer que les dossiers existent avec les bonnes permissions
         $this->ssh->exec("mkdir -p \"{$baseDir}/acme\"");
         $this->ssh->exec("touch \"{$baseDir}/acme/acme.json\" && chmod 600 \"{$baseDir}/acme/acme.json\"");
-        
+
         // S'assurer que le réseau global existe
         $this->ssh->exec("docker network create vpsly_network 2>/dev/null || true");
 
         // 1. Détection de l'état actuel (Standard name: traefik)
         $check = $this->ssh->exec("docker ps --format '{{.Names}}' | grep -E '^traefik$' || true");
         $isRunning = !empty(trim($check));
-        
+
         // On vérifie si c'est déjà la version CLI avec l'API modernisée (dans l'ENV) ou s'il faut migrer
         $env = $isRunning ? $this->ssh->exec("docker inspect traefik --format '{{range .Config.Env}}{{println .}}{{end}}'") : "";
         $cmd = $isRunning ? $this->ssh->exec("docker inspect traefik --format '{{.Config.Cmd}}'") : "";
-        
+
         $isModern = str_contains($cmd, '--providers.docker') && str_contains($env, 'DOCKER_API_VERSION=1.41');
 
         // 2. Action corrective : Migration ou Installation
         if (!$isRunning || !$isModern) {
             $this->streamer->log($deployment, "⚠️ Migration vers l'instance standard Traefik v3 (CLI Mode)...", LogType::INFO);
-            
+
             // Nettoyer tous les anciens emplacements et noms possibles
             $this->ssh->exec("docker rm -f traefik deploykit-gateway vpsly-traefik 2>/dev/null || true");
             $this->ssh->exec("rm -f /etc/traefik/traefik.yml 2>/dev/null || true");
