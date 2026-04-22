@@ -117,7 +117,7 @@ class GitHubApiController extends Controller
         try {
             return response()->json($this->gitHub->getRepositories($user));
         } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 401);
+            return response()->json(['error' => $e->getMessage()], 428);
         }
     }
 
@@ -144,7 +144,7 @@ class GitHubApiController extends Controller
                 $request->repo
             ));
         } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 401);
+            return response()->json(['error' => $e->getMessage()], 428);
         }
     }
 }
