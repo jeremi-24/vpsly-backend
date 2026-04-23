@@ -86,7 +86,10 @@ class BlueprintService
                     $envVars["{$prefix}REDIS_URL"] = "redis://{$host}:{$port}";
                 }
             } else {
-                $envVars["{$prefix}DB_CONNECTION"] = $type;
+                // Laravel utilise 'pgsql' comme nom de driver pour Postgres
+                $laravelType = ($type === 'postgres') ? 'pgsql' : $type;
+
+                $envVars["{$prefix}DB_CONNECTION"] = $laravelType;
                 $envVars["{$prefix}DB_HOST"] = $host;
                 $envVars["{$prefix}DB_PORT"] = $port;
                 $envVars["{$prefix}DB_DATABASE"] = $db->postgres_db;
@@ -204,6 +207,16 @@ class BlueprintService
      * Détecte si le plan Nixpacks contient un provider donné.
      * Scanne plusieurs niveaux de la structure JSON pour une détection robuste.
      */
+    public function getSlug(Application $app): string
+    {
+        return strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
+    }
+
+    public function isPhp(array $plan): bool
+    {
+        return $this->planContains($plan, 'php');
+    }
+
     protected function planContains(array $plan, string $keyword): bool
     {
         $providers = data_get($plan, 'providers', []);

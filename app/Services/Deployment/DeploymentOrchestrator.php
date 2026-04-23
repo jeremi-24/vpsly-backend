@@ -111,18 +111,30 @@ class DeploymentOrchestrator
                     $this->streamer->log($deployment, $line, LogType::DEBUG);
                 });
 
+                // AUTO-MIGRATION (Pour Laravel/PHP)
+                if ($this->blueprint->isPhp($nixpacksPlan)) {
+                    $this->streamer->log($deployment, "📦 Exécution des migrations (Laravel)...", LogType::INFO);
+                    // On donne quelques secondes à la DB pour respirer si elle vient d'être créée
+                    sleep(2);
+                    $appSlug = $this->blueprint->getSlug($app);
+                    $this->ssh->stream("docker exec {$appSlug} php artisan migrate --force", function ($line) use ($deployment) {
+                        $this->streamer->log($deployment, $line, LogType::DEBUG);
+                    });
+                }
+
                 // FIX PERMISSIONS : Les volumes montés sont souvent root:root par défaut
                 // On force le propriétaire www-data (UID 33 courant) pour la compatibilité Nixpacks/Laravel
                 $volumes = $app->persistentVolumes()->get();
                 if ($volumes->count() > 0) {
                     $this->streamer->log($deployment, "Ajustement des permissions sur les volumes...", LogType::DEBUG);
+                    $appSlug = $this->blueprint->getSlug($app);
                     foreach ($volumes as $vol) {
                         // On exécute le chown via docker exec pour être sûr d'impacter le montage
-                        $this->ssh->exec("docker exec {$app->id} chown -R 33:33 \"{$vol->mount_path}\" 2>/dev/null || true");
+                        $this->ssh->exec("docker exec {$appSlug} chown -R 33:33 \"{$vol->mount_path}\" 2>/dev/null || true");
                     }
                 }
             } catch (Exception $e) {
-                throw new \App\Exceptions\Deployment\NonRetryableException("Docker Up failed: " . $e->getMessage(), 0, $e);
+                throw new \App\Exceptions\Deployment\NonRetryableException("Docker Up/Migrate failed: " . $e->getMessage(), 0, $e);
             }
 
 
