@@ -35,8 +35,8 @@ class ApplicationLogController extends Controller
      */
     public function stream(Application $app)
     {
-        // On dispatch le job en queue (asynchrone)
-        StreamRuntimeLogsJob::dispatch($app->id);
+        // On dispatch le job sur une queue dédiée 'logs' pour ne pas bloquer les déploiements
+        StreamRuntimeLogsJob::dispatch($app->id)->onQueue('logs');
 
         return response()->json([
             'message' => 'Log streaming started'

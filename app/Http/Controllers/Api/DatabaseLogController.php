@@ -38,8 +38,8 @@ class DatabaseLogController extends Controller
      */
     public function stream(StandalonePostgresql $database)
     {
-        // On dispatch le job en queue (asynchrone)
-        StreamDatabaseLogsJob::dispatch($database->id);
+        // On dispatch le job sur une queue dédiée 'logs' pour ne pas bloquer les déploiements
+        StreamDatabaseLogsJob::dispatch($database->id)->onQueue('logs');
 
         return response()->json([
             'message' => 'Database log streaming started'

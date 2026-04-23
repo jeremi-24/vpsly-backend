@@ -7,14 +7,23 @@ use App\Services\Deployment\RuntimeLogService;
 use App\Services\Deployment\SSHService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-class StreamDatabaseLogsJob implements ShouldQueue
+class StreamDatabaseLogsJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * L'ID unique pour ce job (une seule instance par base de données).
+     */
+    public function uniqueId(): string
+    {
+        return (string) $this->databaseId;
+    }
 
     /**
      * Le temps maximal d'exécution du Job (15 minutes par exemple).
