@@ -33,9 +33,13 @@ class BlueprintService
         $appSlug = strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
         $isPhp = $this->planContains($nixpacksPlan, 'php');
         
+        $serverIp = $app->server->ip ?? '127.0.0.1';
+        $domain = "{$appSlug}.{$serverIp}.sslip.io";
+
         $envVars = [
             'APP_NAME' => $appSlug,
             'APP_ENV' => 'production',
+            'APP_URL' => "https://{$domain}",
         ];
 
         if ($isPhp) {

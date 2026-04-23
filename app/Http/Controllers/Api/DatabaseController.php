@@ -127,11 +127,9 @@ class DatabaseController extends Controller
         if ($app) {
              // On crée un nouveau déploiement via le contrôleur dédié pour avoir les logs
              $deployment = $app->deployments()->create([
-                 'server_id' => $app->server_id,
                  'status' => 'pending',
-                 'type' => 'config_update'
              ]);
-             \App\Jobs\DeployAppJob::dispatch($app, $deployment);
+             \App\Jobs\DeployApplicationJob::dispatch($deployment->id);
         }
 
         return response()->json([
@@ -155,11 +153,9 @@ class DatabaseController extends Controller
             $app = \App\Models\Application::find($oldAppId);
             if ($app) {
                  $deployment = $app->deployments()->create([
-                     'server_id' => $app->server_id,
                      'status' => 'pending',
-                     'type' => 'config_update'
                  ]);
-                 \App\Jobs\DeployAppJob::dispatch($app, $deployment);
+                 \App\Jobs\DeployApplicationJob::dispatch($deployment->id);
             }
         }
 
