@@ -272,7 +272,8 @@ class DeploymentOrchestrator
      */
     protected function resolveNodeVersion(string $appPath, Deployment $deployment): string
     {
-        $fallbackVersion = "20"; // Node 20 est le standard de base pour les apps modernes
+        // Vite 8+ exige Node 20.19+ ou 22.12+ — on cible 22 pour être safe
+        $fallbackVersion = "22";
 
         try {
             $this->streamer->log($deployment, "🔍 Détection de la version Node.js requise...", LogType::DEBUG);
@@ -281,30 +282,46 @@ class DeploymentOrchestrator
             $json = $this->ssh->exec("cat \"{$appPath}/package.json\" 2>/dev/null || echo 'not found'");
 
             if (trim($json) === 'not found' || empty($json)) {
-                $this->streamer->log($deployment, "Fichier package.json non trouvé. Utilisation de la version par défaut (Node {$fallbackVersion}).", LogType::DEBUG);
+                $this->streamer->log($deployment, "package.json non trouvé. Utilisation de Node {$fallbackVersion}.", LogType::DEBUG);
                 return $fallbackVersion;
             }
 
             $data = json_decode($json, true);
+
+            // Détection Vite 8+ dans devDependencies ou dependencies
+            $allDeps = array_merge(
+                $data['dependencies'] ?? [],
+                $data['devDependencies'] ?? []
+            );
+
+            if (isset($allDeps['vite'])) {
+                $viteConstraint = ltrim($allDeps['vite'], '^~>=');
+                $viteMajor = (int) explode('.', $viteConstraint)[0];
+                if ($viteMajor >= 8) {
+                    $this->streamer->log($deployment, "⚡ Vite {$viteMajor} détecté → Node 22 requis (20.18 insuffisant).", LogType::DEBUG);
+                    return "22";
+                }
+            }
+
+            // Lecture du champ engines.node
             $enginesNode = data_get($data, 'engines.node');
 
             if (!$enginesNode) {
-                $this->streamer->log($deployment, "Aucune version Node spécifiée dans package.json. Utilisation de Node {$fallbackVersion}.", LogType::DEBUG);
+                $this->streamer->log($deployment, "Aucune version Node dans engines. Utilisation de Node {$fallbackVersion}.", LogType::DEBUG);
                 return $fallbackVersion;
             }
 
             // Extraction de la version majeure via Regex
-            // Supporte: ">=20.9.0", "^18.0.0", "16.x", "14" etc.
             if (preg_match('/(\d+)(?:\.\d+)*/', $enginesNode, $matches)) {
                 $version = $matches[1];
 
-                // Sécurité : Si la version détectée est < 18, on conseille 20
-                if (intval($version) < 18) {
-                    $this->streamer->log($deployment, "⚠️ Version Node {$version} détectée (trop ancienne). Forçage vers Node {$fallbackVersion} pour stabilité.", LogType::DEBUG);
+                // Sécurité : Si la version détectée est < 20, on conseille 22
+                if (intval($version) < 20) {
+                    $this->streamer->log($deployment, "⚠️ Node {$version} trop ancien. Forçage vers Node {$fallbackVersion}.", LogType::DEBUG);
                     return $fallbackVersion;
                 }
 
-                $this->streamer->log($deployment, "✅ Version Node {$version} détectée et sélectionnée.", LogType::INFO);
+                $this->streamer->log($deployment, "✅ Node {$version} sélectionné.", LogType::INFO);
                 return $version;
             }
 
