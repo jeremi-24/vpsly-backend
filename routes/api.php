@@ -52,6 +52,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/', [ApplicationLogController::class, 'index']);
             Route::post('/stream', [ApplicationLogController::class, 'stream']);
         });
+
+        // Volumes Persistants
+        Route::prefix('{application}/volumes')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\ApplicationVolumeController::class, 'index']);
+            Route::post('/', [\App\Http\Controllers\Api\ApplicationVolumeController::class, 'store']);
+            Route::delete('/{id}', [\App\Http\Controllers\Api\ApplicationVolumeController::class, 'destroy']);
+        });
     });
 
 
@@ -76,7 +83,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [DatabaseController::class, 'store']);
         Route::get('/{database}', [DatabaseController::class, 'show']);
         Route::post('/{database}/deploy', [DatabaseController::class, 'deploy']);
+        Route::post('/{database}/verify', [DatabaseController::class, 'verifyIntegrity']);
         Route::patch('/{database}/toggle-public', [DatabaseController::class, 'togglePublic']);
+        Route::post('/{database}/link', [DatabaseController::class, 'link']);
+        Route::post('/{database}/unlink', [DatabaseController::class, 'unlink']);
 
         // Logs de Runtime des Bases de données
         Route::prefix('{database}/logs')->group(function () {

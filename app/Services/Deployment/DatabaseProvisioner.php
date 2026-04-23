@@ -130,12 +130,14 @@ class DatabaseProvisioner
             $yml .= "      - \"{$database->public_port}:{$internalPort}\"\n";
         }
 
-        if ($database->limits_memory && $database->limits_memory !== '0') {
-            $yml .= "    mem_limit: {$database->limits_memory}\n";
-        }
-        if ($database->limits_cpus && $database->limits_cpus !== '0') {
-            $yml .= "    cpus: {$database->limits_cpus}\n";
-        }
+        $memoryLimit = ($database->limits_memory && $database->limits_memory !== '0') ? $database->limits_memory : '512MB';
+        $cpuLimit = ($database->limits_cpus && $database->limits_cpus !== '0') ? $database->limits_cpus : '0.5';
+
+        $yml .= "    deploy:\n";
+        $yml .= "      resources:\n";
+        $yml .= "        limits:\n";
+        $yml .= "          memory: {$memoryLimit}\n";
+        $yml .= "          cpus: '{$cpuLimit}'\n";
 
         $yml .= "networks:\n";
         $yml .= "  vpsly_network:\n";

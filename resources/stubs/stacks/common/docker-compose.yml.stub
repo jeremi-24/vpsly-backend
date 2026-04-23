@@ -10,6 +10,8 @@ services:
       - .env
     networks:
       - vpsly_network
+{{VOLUMES}}
+{{RESOURCES}}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.{{APP_ID}}.rule=Host(`{{DOMAIN}}`)"
@@ -23,4 +25,6 @@ services:
 networks:
   vpsly_network:
     external: true
+
+{{VOLUME_DEFINITIONS}}
 

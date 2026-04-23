@@ -109,10 +109,20 @@ class DeploymentOrchestrator
             $this->ssh->exec("docker network ls | grep -q 'vpsly_network' || docker network create vpsly_network");
 
             try {
-                // On n'utilise plus --build car l'image est déjà faite par Nixpacks
                 $this->ssh->stream("cd \"{$appPath}\" && docker compose up -d", function ($line) use ($deployment) {
                     $this->streamer->log($deployment, $line, LogType::DEBUG);
                 });
+
+                // FIX PERMISSIONS : Les volumes montés sont souvent root:root par défaut
+                // On force le propriétaire www-data (UID 33 courant) pour la compatibilité Nixpacks/Laravel
+                $volumes = $app->persistentVolumes()->get();
+                if ($volumes->count() > 0) {
+                    $this->streamer->log($deployment, "Ajustement des permissions sur les volumes...", LogType::DEBUG);
+                    foreach ($volumes as $vol) {
+                        // On exécute le chown via docker exec pour être sûr d'impacter le montage
+                        $this->ssh->exec("docker exec {$app->id} chown -R 33:33 \"{$vol->mount_path}\" 2>/dev/null || true");
+                    }
+                }
             } catch (Exception $e) {
                 throw new \App\Exceptions\Deployment\NonRetryableException("Docker Up failed: " . $e->getMessage(), 0, $e);
             }

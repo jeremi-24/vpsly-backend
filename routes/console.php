@@ -6,3 +6,13 @@ use Illuminate\Support\Facades\Artisan;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+use Illuminate\Support\Facades\Schedule;
+use App\Models\Server;
+use App\Jobs\MonitorServerJob;
+
+// Schedule::call(function () {
+//     Server::all()->each(function ($server) {
+//         MonitorServerJob::dispatch($server);
+//     });
+// })->everyMinute();

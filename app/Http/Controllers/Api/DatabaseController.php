@@ -87,4 +87,85 @@ class DatabaseController extends Controller
         // On redéploie pour appliquer le changement
         return $this->deploy($database->id);
     }
+    public function verifyIntegrity($id, \App\Services\Deployment\SSHService $ssh)
+    {
+        $database = StandalonePostgresql::findOrFail($id);
+        $volumeName = "db-data-{$database->uuid}";
+        
+        try {
+            $ssh->connect($database->server);
+            $check = $ssh->exec("docker volume inspect \"{$volumeName}\" > /dev/null 2>&1 && echo 'exists' || echo 'missing'");
+            $ssh->disconnect();
+
+            $exists = trim($check) === 'exists';
+            
+            return response()->json([
+                'is_intact' => $exists,
+                'volume_name' => $volumeName,
+                'message' => $exists ? 'Volume trouvé et intègre' : 'ATTENTION: Volume introuvable sur le VPS'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'is_intact' => false,
+                'message' => 'Impossible de contacter le serveur pour vérification'
+            ], 500);
+        }
+    }
+    public function link(Request $request, StandalonePostgresql $database)
+    {
+        $validated = $request->validate([
+            'application_id' => 'required|exists:applications,id'
+        ]);
+
+        $database->update([
+            'application_id' => $validated['application_id']
+        ]);
+
+        // Déclencher le redéploiement de l'application
+        $app = \App\Models\Application::find($validated['application_id']);
+        if ($app) {
+             // On crée un nouveau déploiement via le contrôleur dédié pour avoir les logs
+             $deployment = $app->deployments()->create([
+                 'server_id' => $app->server_id,
+                 'status' => 'pending',
+                 'type' => 'config_update'
+             ]);
+             \App\Jobs\DeployAppJob::dispatch($app, $deployment);
+        }
+
+        return response()->json([
+            'message' => 'Lien établi. Mise à jour de l\'application en cours...',
+            'database' => $database
+        ]);
+    }
+
+    /**
+     * Dissocie la base de données de son application.
+     */
+    public function unlink(StandalonePostgresql $database)
+    {
+        $oldAppId = $database->application_id;
+
+        $database->update([
+            'application_id' => null
+        ]);
+
+        if ($oldAppId) {
+            $app = \App\Models\Application::find($oldAppId);
+            if ($app) {
+                 $deployment = $app->deployments()->create([
+                     'server_id' => $app->server_id,
+                     'status' => 'pending',
+                     'type' => 'config_update'
+                 ]);
+                 \App\Jobs\DeployAppJob::dispatch($app, $deployment);
+            }
+        }
+
+        return response()->json([
+            'message' => 'Lien rompu. Mise à jour de l\'application en cours...',
+            'database' => $database
+        ]);
+    }
 }

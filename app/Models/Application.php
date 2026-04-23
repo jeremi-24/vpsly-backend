@@ -37,4 +37,14 @@ class Application extends Model
     {
         return $this->hasMany(EnvironmentVariable::class);
     }
+
+    public function databases(): HasMany
+    {
+        return $this->hasMany(StandalonePostgresql::class);
+    }
+
+    public function persistentVolumes(): \Illuminate\Database\Eloquent\Relations\MorphMany
+    {
+        return $this->morphMany(LocalPersistentVolume::class, 'resource');
+    }
 }
