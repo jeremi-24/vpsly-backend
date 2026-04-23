@@ -49,27 +49,28 @@ class NixpacksService
 
         $env = "";
         if ($nodeVersion) {
-            $env = "NIXPACKS_NODE_VERSION={$nodeVersion} ";
+            $env = " --env NIXPACKS_NODE_VERSION={$nodeVersion}";
         }
 
-        $command = "cd \"{$appPath}\" && {$env}nixpacks plan . --format json";
+        $command = "cd \"{$appPath}\" && export PATH=\$PATH:/usr/local/bin && nixpacks plan . --format json{$env}";
 
         try {
             $json = $this->ssh->exec($command);
 
-            if (empty($json) || str_contains($json, 'error')) {
-                throw new \Exception("Nixpacks n'a pas pu générer de plan pour ce projet. Vérifiez que le répertoire n'est pas vide.");
+            if (empty($json)) {
+                throw new \Exception("Nixpacks a renvoyé une réponse vide.");
             }
 
             $plan = json_decode($json, true);
 
             if (json_last_error() !== JSON_ERROR_NONE) {
-                // Si le JSON est invalide, on tente de nettoyer
+                // Si le JSON est invalide, on tente de nettoyer (Nixpacks peut parfois sortir du texte avant le JSON)
                 if (preg_match('/\{.*\}/s', $json, $matches)) {
                     $plan = json_decode($matches[0], true);
                 }
 
                 if (!$plan) {
+                    $this->logStreamer->log($deployment, "❌ Erreur JSON Nixpacks. Raw output: " . substr($json, 0, 500), \App\Enums\LogType::ERROR);
                     throw new \Exception("Erreur lors de la lecture du plan Nixpacks : " . json_last_error_msg());
                 }
             }
@@ -93,10 +94,11 @@ class NixpacksService
 
         $env = "";
         if ($nodeVersion) {
-            $env = "NIXPACKS_NODE_VERSION={$nodeVersion} ";
+            $env = " --env NIXPACKS_NODE_VERSION={$nodeVersion}";
         }
 
-        $command = "cd \"{$appPath}\" && {$env}nixpacks build . --name \"{$imageName}\" --inline-cache";
+        // On s'assure que nixpacks est bien dans le PATH pour cette session
+        $command = "cd \"{$appPath}\" && export PATH=\$PATH:/usr/local/bin && nixpacks build . --name \"{$imageName}\" --inline-cache{$env}";
 
         Log::info("[Nixpacks] Running build: {$command}");
 

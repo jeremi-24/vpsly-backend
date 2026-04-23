@@ -66,16 +66,14 @@ class DeploymentOrchestrator
             $this->git->sync($app->repo_url, $app->branch, $appPath, $app->user->github_token);
             $this->streamer->log($deployment, "Code synchronized (Branch: {$app->branch}).", LogType::SUCCESS);
 
-            // NETTOYAGE : Invalidation chirurgicale du cache Nixpacks
-            // Cela force un nouveau plan mais préserve le cache Docker pour les couches inchangées.
-            $this->ssh->exec("rm -rf \"{$appPath}/.nixpacks\"");
+            // NETTOYAGE : Invalidation du cache et des fichiers de détection parasites
+            $this->ssh->exec("rm -rf \"{$appPath}/.nixpacks\" \"{$appPath}/.node-version\" \"{$appPath}/.npmrc\" \"{$appPath}/.pnpm-lock.yaml\"");
 
             // ANALYSE : Résolution de la version Node
             $nodeVersion = $this->resolveNodeVersion($appPath, $deployment);
 
             // ANCRAGE : Écriture du fichier .node-version (mécanisme natif Nixpacks)
-            // Nixpacks lit ce fichier en priorité pour déterminer la version Node.
-            // C'est plus fiable que la variable d'environnement shell.
+            // On le fait systématiquement car Nixpacks gère PHP et Node indépendamment.
             $this->ssh->exec("echo \"{$nodeVersion}\" > \"{$appPath}/.node-version\"");
             $this->streamer->log($deployment, "📌 Fichier .node-version créé (Node {$nodeVersion}).", LogType::DEBUG);
 

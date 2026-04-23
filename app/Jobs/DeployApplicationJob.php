@@ -20,14 +20,14 @@ class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue, \
     /**
      * Nombre de tentatives avant échec définitif.
      */
-    public $tries = 3;
+    public $tries = 1;
 
     /**
      * Temps d'attente entre chaque retry (en secondes).
      */
     public function backoff(): array
     {
-        return [10, 30, 60];
+        return [10];
     }
 
     /**
@@ -35,8 +35,8 @@ class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue, \
      */
     public function uniqueId(): string
     {
-        return (string) $this->deploymentId; // ID du déploiement ou de l'app ?
-        // On préfère l'ID du déploiement car le controller rejette déjà via is_deploying.
+        $deployment = \App\Models\Deployment::find($this->deploymentId);
+        return (string) ($deployment->application_id ?? $this->deploymentId);
     }
 
     /**

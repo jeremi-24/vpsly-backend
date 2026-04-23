@@ -30,7 +30,9 @@ class GitService
                 Log::info("[Git] Repository already exists. Pulling...");
                 $this->pull($branch, $path);
             } else {
-                Log::info("[Git] Repository does not exist or is empty. Cloning...");
+                Log::info("[Git] Repository does not exist or is empty. Cleaning and cloning...");
+                // On nettoie le dossier pour éviter l'erreur "destination path already exists and is not an empty directory"
+                $this->ssh->exec("rm -rf {$path} && mkdir -p {$path}");
                 $this->clone($repo, $branch, $path, $token);
             }
         } catch (Exception $e) {
@@ -69,13 +71,13 @@ class GitService
 
     protected function pull(string $branch, string $path): void
     {
-        Log::info("[Git] Executing fetch and hard reset...");
+        Log::info("[Git] Executing fetch, hard reset and clean...");
         $ePath = escapeshellarg($path);
         
         // FIX 3: Pas de quotes sur le branch name dans origin/branch
         $branchClean = trim($branch);
         
-        $this->ssh->exec("cd {$ePath} && git fetch origin && git reset --hard origin/{$branchClean}");
+        $this->ssh->exec("cd {$ePath} && git fetch origin && git reset --hard origin/{$branchClean} && git clean -fd");
         Log::info("[Git] Pull command successful.");
     }
 

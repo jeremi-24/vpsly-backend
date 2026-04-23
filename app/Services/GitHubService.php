@@ -70,4 +70,39 @@ class GitHubService
 
         return $response->json();
     }
+
+    /**
+     * Récupère les informations de l'utilisateur GitHub.
+     */
+    public function getUserInfo(User $user)
+    {
+        if (!$user->github_token) {
+            return ['connected' => false];
+        }
+
+        $response = Http::withToken($user->github_token)
+            ->withHeaders(['User-Agent' => 'VPSLY-Engine'])
+            ->get("{$this->baseUrl}/user");
+
+        if (!$response->successful()) {
+            if ($response->status() === 401) {
+                // Token invalide ou expiré
+                $user->update([
+                    'github_token' => null,
+                    'github_id' => null,
+                ]);
+                return ['connected' => false];
+            }
+            throw new Exception("Erreur GitHub API (User) : " . $response->body());
+        }
+
+        $data = $response->json();
+        return [
+            'connected' => true,
+            'id' => $data['id'],
+            'login' => $data['login'],
+            'avatar_url' => $data['avatar_url'],
+            'name' => $data['name'],
+        ];
+    }
 }
