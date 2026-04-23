@@ -45,7 +45,7 @@ class RuntimeLogService
     /**
      * Lance un stream SSH et diffuse chaque ligne reçue via WebSockets.
      */
-    public function streamLogs($resource, string $channelName = null): void
+    public function streamLogs($resource, ?string $channelName = null): void
     {
         $containerName = $this->getContainerName($resource);
         $command = "docker logs -f --tail 0 {$containerName} 2>&1";

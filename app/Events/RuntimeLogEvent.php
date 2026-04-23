@@ -17,7 +17,7 @@ class RuntimeLogEvent implements ShouldBroadcast
     public function __construct(
         public int $resourceId,
         public string $message,
-        public string $channelName = null,
+        public ?string $channelName = null,
         public string $type = 'info'
     ) {
         $this->channelName = $channelName ?? "application.{$this->resourceId}.runtime-logs";

@@ -3,11 +3,20 @@
 namespace App\Jobs;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Foundation\Queue\Queueable;
 
-class StreamRuntimeLogsJob implements ShouldQueue
+class StreamRuntimeLogsJob implements ShouldQueue, ShouldBeUnique
 {
     use Queueable;
+
+    /**
+     * L'ID unique pour ce job (une seule instance par application).
+     */
+    public function uniqueId(): string
+    {
+        return (string) $this->applicationId;
+    }
 
     /**
      * Le nombre de secondes pendant lesquelles le job peut s'exécuter.
@@ -20,12 +29,6 @@ class StreamRuntimeLogsJob implements ShouldQueue
     {
         $app = \App\Models\Application::findOrFail($this->applicationId);
         
-        // Sécurité : Un seul stream par application
-        $lockKey = "stream_logs_{$app->id}";
-        if (!\Illuminate\Support\Facades\Cache::lock($lockKey, 300)->get()) {
-            return;
-        }
-
         try {
             // Connexion SSH
             $ssh->connect($app->server);
@@ -45,7 +48,6 @@ class StreamRuntimeLogsJob implements ShouldQueue
                 'error' => $e->getMessage()
             ]);
         } finally {
-            \Illuminate\Support\Facades\Cache::forget($lockKey);
             $ssh->disconnect();
         }
     }
