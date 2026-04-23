@@ -10,9 +10,9 @@ use App\Events\DeploymentLogEvent;
 class LogStreamer
 {
     protected array $buffer = [];
-    protected int $batchSize = 50;
+    protected int $batchSize = 2; // Réduit pour le Streaming v2 (quasi ligne par ligne)
     protected float $lastFlushTime;
-    protected float $flushInterval = 0.2; // 200ms Sweet Spot
+    protected float $flushInterval = 0.05; // 50ms pour une fluidité extrême
 
     public function __construct()
     {
@@ -20,33 +20,30 @@ class LogStreamer
     }
 
     /**
-     * Enregistre un log et déclenche un flush si nécessaire.
+     * Enregistre un log (Méthode Coolify) et déclenche un flush si nécessaire.
      */
     public function log(Deployment $deployment, string $line, LogType $type = LogType::INFO): void
     {
-        // 1. Audit (DB)
-        DeploymentLog::create([
-            'deployment_id' => $deployment->id,
-            'line' => $line,
-            'type' => $type->value,
-        ]);
+        // 1. Audit (Format Coolify : JSON dans la table deployments)
+        $coolifyType = ($type === LogType::ERROR) ? 'stderr' : 'stdout';
+        $deployment->addLogEntry($line, $coolifyType);
 
-        // 2. Buffer pour le live (WebSocket)
+        // 2. Buffer pour le live (WebSocket via Reverb)
         $this->buffer[] = [
             'type' => $type->value,
             'message' => $line,
             'timestamp' => now()->toISOString()
         ];
 
-        // 3. Flush intelligent (Batching)
-        // Flush si : N lignes atteintes OU intervalle de temps dépassé
+        // 3. Flush intelligent (Streaming v2)
+        // On flush si on a 2 lignes OU si 50ms se sont écoulées
         if (count($this->buffer) >= $this->batchSize || (microtime(true) - $this->lastFlushTime) >= $this->flushInterval) {
             $this->flush($deployment);
         }
     }
 
     /**
-     * Envoie le buffer via WebSocket et réinitialise le timer.
+     * Envoie le buffer via WebSocket (Reverb) et réinitialise le timer.
      */
     public function flush(Deployment $deployment): void
     {
@@ -54,10 +51,11 @@ class LogStreamer
             return;
         }
 
-        // Broadcast groupé pour fluidifier l'UI (Reverb)
+        // Broadcast immédiat (ShouldBroadcastNow)
         broadcast(new DeploymentLogEvent($deployment->id, $this->buffer));
 
         $this->buffer = [];
         $this->lastFlushTime = microtime(true);
     }
 }
+

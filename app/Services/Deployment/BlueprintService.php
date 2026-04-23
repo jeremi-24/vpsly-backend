@@ -16,22 +16,25 @@ class BlueprintService
      */
     public function syncConfiguration(Application $app, string $imageName, string $appPath, array $nixpacksPlan = []): void
     {
-        // 1. Génération du fichier .env (Variables Système + Utilisateur)
+        // 1. Création du dossier de travail (Workdir)
+        $this->ssh->exec("mkdir -p \"{$appPath}\"");
+
+        // 2. Génération du fichier .env (Variables Système + Utilisateur)
         $this->syncEnvironmentVariables($app, $appPath, $nixpacksPlan);
 
-        // 2. Docker Compose (utilise l'image déjà buildée par Nixpacks)
+        // 3. Docker Compose (utilise l'image déjà buildée par Nixpacks)
         $compose = $this->getCompose($app, $imageName, $nixpacksPlan);
         $this->writeRemoteFile($appPath . '/docker-compose.yml', $compose);
     }
 
     /**
      * Génère et écrit le fichier .env de manière atomique sur le VPS.
+     * Copie de la logique de Coolify pour les variables magiques.
      */
     protected function syncEnvironmentVariables(Application $app, string $appPath, array $nixpacksPlan): void
     {
-        // 1. Variables système par défaut
-        $appSlug = strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
-        $isPhp = $this->planContains($nixpacksPlan, 'php');
+        $appSlug = $this->getSlug($app);
+        $isPhp = $this->isPhp($nixpacksPlan);
         
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $domain = "{$appSlug}.{$serverIp}.sslip.io";
@@ -43,19 +46,21 @@ class BlueprintService
         ];
 
         if ($isPhp) {
-            // Nixpacks détecte nativement Laravel/PHP et configure le root sur /public.
-            // On évite de forcer NIXPACKS_PHP_FALLBACK_PATH car cela peut créer des doublons de "location /" dans nginx.conf
+            // Logique Laravel/PHP
+            $envVars['NIXPACKS_PHP_ROOT_DIR'] = '/app/public';
+            $envVars['NIXPACKS_PHP_FALLBACK_PATH'] = '/index.php';
             
-            // Génération automatique de APP_KEY si absente (requis par Laravel)
+            // Génération automatique de APP_KEY si absente
             if (!$app->environmentVariables()->where('key', 'APP_KEY')->exists()) {
                 $envVars['APP_KEY'] = 'base64:' . base64_encode(random_bytes(32));
             }
         } else {
+            // Logique Node.js (NestJS, etc.)
             $envVars['NODE_ENV'] = 'production';
             $envVars['PORT'] = '3000';
         }
 
-        // 2. Injection automatique des bases de données liées (Priorité standard)
+        // Injection des bases de données liées
         $databases = $app->databases()->with('server')->get();
         $dbTypesFound = [];
         
@@ -65,13 +70,11 @@ class BlueprintService
 
             $dbTypesFound[$type] = ($dbTypesFound[$type] ?? 0) + 1;
             
+            // Si sur le même serveur, on utilise l'alias Docker, sinon l'IP
             $isSameServer = $db->server_id === $app->server_id;
             $host = $isSameServer ? $db->uuid : $db->server->ip;
             $port = $type === 'mysql' ? '3306' : ($type === 'redis' ? '6379' : '5432');
             
-            // On définit des préfixes pour éviter les écrasements si plusieurs bases
-            // La première base d'un type est la base "par défaut" (sans préfixe)
-            // Les suivantes sont préfixées par leur nom (nettoyé)
             $isSecondary = $dbTypesFound[$type] > 1;
             $slugName = strtoupper(preg_replace('/[^a-z0-9]/i', '_', $db->name));
             $prefix = $isSecondary ? "{$slugName}_" : "";
@@ -86,7 +89,7 @@ class BlueprintService
                     $envVars["{$prefix}REDIS_URL"] = "redis://{$host}:{$port}";
                 }
             } else {
-                // Laravel utilise 'pgsql' comme nom de driver pour Postgres
+                // Mapping DB spécifique (Coolify style)
                 $laravelType = ($type === 'postgres') ? 'pgsql' : $type;
 
                 $envVars["{$prefix}DB_CONNECTION"] = $laravelType;
@@ -101,81 +104,91 @@ class BlueprintService
             }
         }
 
-        // 3. Variables configurées manuellement par l'utilisateur (Priorité MAX - Écrase tout le reste)
+        // Variables utilisateur (Priorité MAX)
         $userVars = $app->environmentVariables()->get();
         foreach ($userVars as $var) {
             $envVars[$var->key] = $var->value;
         }
 
-        // 4. Formatage pour le fichier .env
         $content = "";
         foreach ($envVars as $key => $value) {
             $content .= "{$key}=\"{$value}\"\n";
         }
 
-        // 4. Écriture atomique
         $this->writeAtomicRemoteFile($appPath . '/.env', $content);
     }
 
+    /**
+     * Génère le docker-compose.yml final (Moteur de combo - 100% Coolify Style).
+     */
     protected function getCompose(Application $app, string $imageName, array $nixpacksPlan): string
     {
-        $path = resource_path("stubs/stacks/common/docker-compose.yml.stub");
-        if (!File::exists($path)) {
-             $path = resource_path("stubs/stacks/common/docker-compose.yml");
-        }
-        
-        $content = File::get($path);
-        
-        $isPhp = $this->planContains($nixpacksPlan, 'php');
+        $appSlug = $this->getSlug($app);
+        $isPhp = $this->isPhp($nixpacksPlan);
         $containerPort = $isPhp ? 80 : 3000;
-        $appSlug = strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
-
+        
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $domain = "{$appSlug}.{$serverIp}.sslip.io";
 
-        // Volumes
+        // Limites de ressources (Copy of Coolify)
+        $memoryLimit = "512MB";
+        $cpuLimit = "0.5";
+
+        $services = [
+            $appSlug => [
+                'container_name' => $appSlug,
+                'image' => $imageName,
+                'restart' => 'always',
+                'env_file' => ['.env'],
+                'networks' => ['vpsly'],
+                'labels' => [
+                    "traefik.enable=true",
+                    "traefik.http.routers.{$appSlug}.rule=Host(`{$domain}`)",
+                    "traefik.http.routers.{$appSlug}.entrypoints=web",
+                    "traefik.http.services.{$appSlug}.loadbalancer.server.port={$containerPort}",
+                ],
+                'healthcheck' => [
+                    'test' => ["CMD-SHELL", "curl -f http://localhost:{$containerPort}/ || exit 1"],
+                    'interval' => '10s',
+                    'timeout' => '5s',
+                    'retries' => 3,
+                    'start_period' => '10s'
+                ],
+                'deploy' => [
+                    'resources' => [
+                        'limits' => [
+                            'memory' => $memoryLimit,
+                            'cpus' => $cpuLimit
+                        ]
+                    ]
+                ]
+            ]
+        ];
+
+        // Intégration des volumes persistants
         $volumes = $app->persistentVolumes()->get();
-        $volumeYaml = "";
-        $volumeDefinitions = "";
-        
         if ($volumes->count() > 0) {
-            $volumeYaml = "    volumes:\n";
-            $volumeDefinitions = "networks:\n"; // On rajoute networks car il est souvent avant
-            
+            $services[$appSlug]['volumes'] = [];
             foreach ($volumes as $vol) {
-                // Si host_path est défini, c'est un bind mount, sinon c'est un volume nommé
                 $source = $vol->host_path ?: $vol->name;
-                $volumeYaml .= "      - \"{$source}:{$vol->mount_path}\"\n";
-                
-                if (!$vol->host_path) {
-                    $volumeDefinitions .= "volumes:\n  {$vol->name}:\n    name: {$vol->name}\n";
-                }
+                $services[$appSlug]['volumes'][] = "{$source}:{$vol->mount_path}";
             }
         }
 
-        // Resources Limits (Silent defaults)
-        $memoryLimit = '512MB';
-        $cpuLimit = '0.5';
-
-        $resourcesYaml = "    deploy:\n";
-        $resourcesYaml .= "      resources:\n";
-        $resourcesYaml .= "        limits:\n";
-        $resourcesYaml .= "          memory: {$memoryLimit}\n";
-        $resourcesYaml .= "          cpus: '{$cpuLimit}'\n";
-
-        $replacements = [
-            '{{APP_NAME}}'  => $appSlug,
-            '{{APP_ID}}'    => $app->id,
-            '{{DOMAIN}}'    => $domain,
-            '{{APP_PORT}}'  => $containerPort,
-            '{{IMAGE_NAME}}' => $imageName,
-            '{{VOLUMES}}'   => $volumeYaml,
-            '{{VOLUME_DEFINITIONS}}' => $volumeDefinitions,
-            '{{RESOURCES}}' => $resourcesYaml,
+        // Configuration Réseau
+        $compose = [
+            'services' => $services,
+            'networks' => [
+                'vpsly' => [
+                    'external' => true,
+                    'name' => 'vpsly'
+                ]
+            ]
         ];
 
-        return str_replace(array_keys($replacements), array_values($replacements), $content);
+        return \Symfony\Component\Yaml\Yaml::dump($compose, 10);
     }
+
 
     protected function writeRemoteFile(string $filePath, string $content): void
     {
@@ -184,29 +197,14 @@ class BlueprintService
         $this->ssh->exec($command);
     }
 
-    /**
-     * Écrit un fichier de manière atomique sur le VPS (tmp -> chmod -> mv).
-     */
     protected function writeAtomicRemoteFile(string $filePath, string $content): void
     {
         $base64 = base64_encode($content);
         $tmpPath = $filePath . '.tmp';
-        
-        // Processus : écriture tmp -> sécurisation -> renommage atomique
         $command = "echo '{$base64}' | base64 -d > \"{$tmpPath}\" && chmod 600 \"{$tmpPath}\" && mv \"{$tmpPath}\" \"{$filePath}\"";
-        
         $this->ssh->exec($command);
-        
-        \Log::info("[Blueprint] Atomic file write completed", [
-            'file' => basename($filePath),
-            'size' => strlen($content)
-        ]);
     }
 
-    /**
-     * Détecte si le plan Nixpacks contient un provider donné.
-     * Scanne plusieurs niveaux de la structure JSON pour une détection robuste.
-     */
     public function getSlug(Application $app): string
     {
         return strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
@@ -219,37 +217,7 @@ class BlueprintService
 
     protected function planContains(array $plan, string $keyword): bool
     {
-        $providers = data_get($plan, 'providers', []);
-        if (is_array($providers)) {
-            foreach ($providers as $provider) {
-                if (is_string($provider) && str_contains(strtolower($provider), $keyword)) {
-                    return true;
-                }
-            }
-        }
-
-        $nixPkgs = data_get($plan, 'phases.setup.nixPkgs', []);
-        if (empty($nixPkgs)) {
-            $nixPkgs = data_get($plan, 'phases.setup.nixpkgs', []);
-        }
-        if (is_array($nixPkgs)) {
-            foreach ($nixPkgs as $pkg) {
-                if (is_string($pkg) && str_contains(strtolower($pkg), $keyword)) {
-                    return true;
-                }
-            }
-        }
-
-        $startCmd = data_get($plan, 'start.cmd', '');
-        if (is_string($startCmd) && str_contains(strtolower($startCmd), $keyword)) {
-            return true;
-        }
-
         $jsonStr = strtolower(json_encode($plan));
-        if (str_contains($jsonStr, '"' . $keyword)) {
-            return true;
-        }
-
-        return false;
+        return str_contains($jsonStr, $keyword);
     }
 }

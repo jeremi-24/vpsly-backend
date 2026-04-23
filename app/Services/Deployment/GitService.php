@@ -83,8 +83,24 @@ class GitService
 
 
 
+    /**
+     * Récupère le dernier commit (Hash + Message).
+     */
+    public function getLatestCommit(string $path): array
+    {
+        $ePath = escapeshellarg($path);
+        $hash = trim($this->ssh->exec("cd {$ePath} && git rev-parse HEAD"));
+        $message = trim($this->ssh->exec("cd {$ePath} && git log -1 --pretty=%B"));
+
+        return [
+            'hash' => $hash,
+            'message' => $message
+        ];
+    }
+
     protected function validatePath(string $path): void
     {
+
         if (!str_starts_with($path, '/var/www/vpsly/')) {
             throw new Exception("Chemin de déploiement non autorisé : {$path}");
         }

@@ -43,9 +43,10 @@ class DatabaseProvisioner
             $this->ssh->exec("docker stop -t 10 \"{$containerName}\" 2>/dev/null || true");
             $this->ssh->exec("docker rm -f \"{$containerName}\" 2>/dev/null || true");
             
-            $this->ssh->exec("docker network create vpsly_network 2>/dev/null || true");
+            $this->ssh->exec("docker network create vpsly 2>/dev/null || true");
 
             $this->ssh->exec("cd \"{$configDir}\" && docker compose up -d");
+
 
             $database->update([
                 'status' => 'running',
@@ -120,7 +121,7 @@ class DatabaseProvisioner
         }
         
         $yml .= "    networks:\n";
-        $yml .= "      - vpsly_network\n";
+        $yml .= "      - vpsly\n";
         
         $yml .= "    volumes:\n";
         $yml .= "      - \"{$volumeName}:{$mountPath}\"\n";
@@ -140,9 +141,10 @@ class DatabaseProvisioner
         $yml .= "          cpus: '{$cpuLimit}'\n";
 
         $yml .= "networks:\n";
-        $yml .= "  vpsly_network:\n";
+        $yml .= "  vpsly:\n";
         $yml .= "    external: true\n";
-        $yml .= "    name: vpsly_network\n";
+        $yml .= "    name: vpsly\n";
+
 
         $yml .= "volumes:\n";
         $yml .= "  {$volumeName}:\n";

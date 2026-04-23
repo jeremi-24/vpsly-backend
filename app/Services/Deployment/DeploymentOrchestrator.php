@@ -44,6 +44,10 @@ class DeploymentOrchestrator
             Log::info("[Deploy] Step 1: Preparing status...");
             $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
 
+            if (!$deployment->deployment_uuid) {
+                $deployment->update(['deployment_uuid' => (string) Str::uuid()]);
+            }
+
             Log::info("[Deploy] Step 1: Connecting to SSH...");
             $this->streamer->log($deployment, "Connecting to VPS {$server->ip}...", LogType::INFO);
 
@@ -54,87 +58,102 @@ class DeploymentOrchestrator
             $this->nixpacks->ensureInstalled($server, $deployment);
             $this->ensureTraefik($server, $deployment);
 
-            $appPath = "/var/www/vpsly/apps/" . Str::slug($app->name);
+            $appSlug = $this->blueprint->getSlug($app);
+            $appPath = "/var/www/vpsly/apps/" . $appSlug;
             $this->ssh->exec("mkdir -p \"{$appPath}\"");
 
             $this->streamer->log($deployment, "Connected. Workspace ready at {$appPath}", LogType::SUCCESS);
 
+            // ANALYSE : Variables problématiques (Copy of Coolify)
+            $userVars = $app->environmentVariables()->pluck('value', 'key')->toArray();
+            $warnings = \App\Traits\EnvironmentVariableAnalyzer::analyzeBuildVariables($userVars);
+            foreach ($warnings as $warning) {
+                $this->streamer->log($deployment, "⚠️ BUILD WARNING: {$warning['variable']}={$warning['value']}", LogType::INFO);
+                $this->streamer->log($deployment, "   Issue: {$warning['issue']}", LogType::DEBUG);
+                $this->streamer->log($deployment, "   Recommendation: {$warning['recommendation']}", LogType::DEBUG);
+            }
+
             // STEP 2: CLONING
             $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
+            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
             $this->streamer->log($deployment, "Synchronizing code from {$app->repo_url}...", LogType::INFO);
 
             $this->git->sync($app->repo_url, $app->branch, $appPath, $app->user->github_token);
-            $this->streamer->log($deployment, "Code synchronized (Branch: {$app->branch}).", LogType::SUCCESS);
+            
+            // VERSIONING : On récupère le commit (Copy of Coolify)
+            $commitInfo = $this->git->getLatestCommit($appPath);
+            $deployment->update([
+                'commit' => $commitInfo['hash'],
+                'commit_message' => $commitInfo['message']
+            ]);
+
+            $this->streamer->log($deployment, "Code synchronized. Commit: " . substr($commitInfo['hash'], 0, 7) . " - " . $commitInfo['message'], LogType::SUCCESS);
 
             // NETTOYAGE : Invalidation du cache et des fichiers de détection parasites
             $this->ssh->exec("rm -rf \"{$appPath}/.nixpacks\" \"{$appPath}/.node-version\" \"{$appPath}/.npmrc\" \"{$appPath}/.pnpm-lock.yaml\"");
 
             // ANALYSE : Résolution de la version Node
             $nodeVersion = $this->resolveNodeVersion($appPath, $deployment);
-
-            // ANCRAGE : Écriture du fichier .node-version (mécanisme natif Nixpacks)
-            // On le fait systématiquement car Nixpacks gère PHP et Node indépendamment.
             $this->ssh->exec("echo \"{$nodeVersion}\" > \"{$appPath}/.node-version\"");
-            $this->streamer->log($deployment, "📌 Fichier .node-version créé (Node {$nodeVersion}).", LogType::DEBUG);
-
-            // PURGE : Le cache Docker builder contient les layers avec l'ancienne version Node.
-            // On le purge pour forcer la reconstruction de la layer nix-env.
-            $this->ssh->exec("docker builder prune -f 2>/dev/null || true");
 
             // STEP 3: BUILDING (Nixpacks Engine)
             $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
+            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+            $this->streamer->log($deployment, "Starting Nixpacks build process...", LogType::INFO);
 
             // ANALYSE : On récupère le plan nixpacks pour identifier la stack
             $nixpacksPlan = $this->nixpacks->getPlan($server, $deployment, $appPath, $nodeVersion);
 
-            $imageName = "vpsly-app-{$app->id}";
+            // IMAGE TAG : On utilise le SHA pour l'immuabilité (Copy of Coolify)
+            $imageTag = substr($commitInfo['hash'], 0, 12);
+            $imageName = "vpsly/{$appSlug}:{$imageTag}";
+
             $this->nixpacks->build($server, $deployment, $appPath, $imageName, $nodeVersion);
 
             // STEP 4: DEPLOYING (Docker Compose)
             $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
-            $this->streamer->log($deployment, "Génération de la configuration Docker Compose...", LogType::INFO);
-
-            // BACKUP horodaté du .env existant (si présent)
-            $this->ssh->exec("cd \"{$appPath}\" && cp .env .env.backup.$(date +%s) 2>/dev/null || true");
+            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+            $this->streamer->log($deployment, "Preparing deployment configurations...", LogType::INFO);
 
             $this->blueprint->syncConfiguration($app, $imageName, $appPath, $nixpacksPlan);
 
-            // SÉCURISATION finale des permissions
-            $this->ssh->exec("cd \"{$appPath}\" && chown www-data:www-data .env && chmod 600 .env");
 
-            $this->streamer->log($deployment, "Démarrage des conteneurs...", LogType::INFO);
+            // SÉCURISATION finale des permissions .env
+            $this->ssh->exec("cd \"{$appPath}\" && chmod 600 .env");
 
-            $this->ssh->exec("docker network ls | grep -q 'vpsly_network' || docker network create vpsly_network");
+            $this->streamer->log($deployment, "Deploying with Docker Compose...", LogType::INFO);
+
+            // S'assurer que le réseau global vpsly existe (Standard vpsly)
+            $this->ssh->exec("docker network create vpsly 2>/dev/null || true");
 
             try {
-                $this->ssh->stream("cd \"{$appPath}\" && docker compose up -d", function ($line) use ($deployment) {
+                $this->ssh->stream("cd \"{$appPath}\" && docker compose up -d --remove-orphans", function ($line) use ($deployment) {
                     $this->streamer->log($deployment, $line, LogType::DEBUG);
                 });
 
-                // AUTO-MIGRATION (Pour Laravel/PHP)
+                // AUTO-MIGRATION (Logique intelligente par stack)
                 if ($this->blueprint->isPhp($nixpacksPlan)) {
-                    $this->streamer->log($deployment, "📦 Exécution des migrations (Laravel)...", LogType::INFO);
-                    // On donne quelques secondes à la DB pour respirer si elle vient d'être créée
+                    $this->streamer->log($deployment, "📦 Detected Laravel/PHP stack. Running migrations...", LogType::INFO);
                     sleep(2);
-                    $appSlug = $this->blueprint->getSlug($app);
                     $this->ssh->stream("docker exec {$appSlug} php artisan migrate --force", function ($line) use ($deployment) {
+                        $this->streamer->log($deployment, $line, LogType::DEBUG);
+                    });
+                } elseif (str_contains(json_encode($nixpacksPlan), 'prisma')) {
+                    $this->streamer->log($deployment, "📦 Detected Prisma. Running migrations...", LogType::INFO);
+                    $this->ssh->stream("docker exec {$appSlug} npx prisma migrate deploy", function ($line) use ($deployment) {
                         $this->streamer->log($deployment, $line, LogType::DEBUG);
                     });
                 }
 
-                // FIX PERMISSIONS : Les volumes montés sont souvent root:root par défaut
-                // On force le propriétaire www-data (UID 33 courant) pour la compatibilité Nixpacks/Laravel
+                // FIX PERMISSIONS : Volumes
                 $volumes = $app->persistentVolumes()->get();
                 if ($volumes->count() > 0) {
-                    $this->streamer->log($deployment, "Ajustement des permissions sur les volumes...", LogType::DEBUG);
-                    $appSlug = $this->blueprint->getSlug($app);
                     foreach ($volumes as $vol) {
-                        // On exécute le chown via docker exec pour être sûr d'impacter le montage
                         $this->ssh->exec("docker exec {$appSlug} chown -R 33:33 \"{$vol->mount_path}\" 2>/dev/null || true");
                     }
                 }
             } catch (Exception $e) {
-                throw new \App\Exceptions\Deployment\NonRetryableException("Docker Up/Migrate failed: " . $e->getMessage(), 0, $e);
+                throw new \App\Exceptions\Deployment\NonRetryableException("Docker Compose failed: " . $e->getMessage(), 0, $e);
             }
 
 
@@ -143,24 +162,17 @@ class DeploymentOrchestrator
 
             // FINAL STEP: SUCCESS
             $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
-            $this->streamer->log($deployment, "Les conteneurs ont démarré avec succès! Votre application est maintenant en ligne.", LogType::SUCCESS);
+            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+            $this->streamer->log($deployment, "🚀 Deployment successful!", LogType::SUCCESS);
 
             // CLEANUP
             $this->cleanup($deployment);
 
         } catch (Exception $e) {
-            $msg = "CRITICAL DEPLOYMENT ERROR: " . $e->getMessage();
+            $msg = "❌ DEPLOYMENT FAILED: " . $e->getMessage();
             $this->streamer->log($deployment, $msg, LogType::ERROR);
-
-            try {
-                $this->updateStatus($app, $deployment, DeploymentStatus::FAILED);
-            } catch (Exception $dbEx) {
-                // Si la DB échoue aussi, on log le message brut sans crash total du catch
-                $this->streamer->log($deployment, "Erreur d'enregistrement du statut de déploiement: " . $dbEx->getMessage(), LogType::DEBUG);
-            }
-
+            $this->updateStatus($app, $deployment, DeploymentStatus::FAILED);
             throw $e;
-
         } finally {
             $this->streamer->flush($deployment);
             $this->ssh->disconnect();
@@ -168,91 +180,67 @@ class DeploymentOrchestrator
     }
 
     /**
-     * Vérifie que l'application répond réellement via HTTP.
-     * Hybride : Localhost (vitesse) + Public Domain (propagation Traefik).
+     * Vérifie que l'application répond réellement (Hybrid Check - Copy of Coolify).
      */
     protected function verify(Application $app, Deployment $deployment, string $appPath, array $nixpacksPlan): void
     {
-        // 1. Résolution irréfutable du nom de conteneur
-        $containerId = trim($this->ssh->exec("cd \"{$appPath}\" && docker compose ps -q 2>/dev/null | head -1"));
-        $containerName = trim($this->ssh->exec("docker inspect --format='{{.Name}}' {$containerId} 2>/dev/null | sed 's/\///'"));
-
-        if (empty($containerName)) {
-            $containerName = strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
-        }
-
-        // 2. Détermination intelligente du port
-        $port = trim($this->ssh->exec(
-            "docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' {$containerName} 2>/dev/null | grep '^PORT=' | cut -d'=' -f2"
-        ));
-
-        if (empty($port)) {
-            // Détections basées sur le plan Nixpacks (cohérent avec BlueprintService)
-            $isPhp = $this->planContains($nixpacksPlan, 'php');
-            $port = $isPhp ? '80' : '3000';
-        }
-
-        // 3. Préparation DNS
+        $appSlug = $this->blueprint->getSlug($app);
         $serverIp = $app->server->ip ?? '127.0.0.1';
-        $appSlug = strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
         $domain = "{$appSlug}.{$serverIp}.sslip.io";
 
-        $this->streamer->log($deployment, "🔍 Health check (container={$containerName}, port={$port}, domain={$domain})", LogType::INFO);
+        $this->streamer->log($deployment, "🔍 Verifying application health (Target: https://{$domain})", LogType::INFO);
 
-        $maxAttempts = 18; // 90s
+        $maxAttempts = 30; // Coolify attend souvent assez longtemps pour les gros builds
         $attempt = 0;
-        $active = false;
+        $success = false;
 
         while ($attempt < $maxAttempts) {
             $attempt++;
 
-            // État Docker
-            $state = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$containerName} 2>/dev/null || echo 'missing'"));
-            if ($state !== 'running') {
-                $this->streamer->log($deployment, "⏳ Waiting for container... ({$attempt}/{$maxAttempts})", LogType::DEBUG);
-                sleep(5);
-                continue;
-            }
+            // 1. État Docker (Check Health status du YAML)
+            $health = trim($this->ssh->exec("docker inspect --format='{{.State.Health.Status}}' {$appSlug} 2>/dev/null || echo 'starting'"));
+            $status = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$appSlug} 2>/dev/null || echo 'missing'"));
 
-            // Health Check Hybride : Local (Source de vérité app) OR Public (Source de vérité routing)
-            $localCheck = trim($this->ssh->exec("docker exec {$containerName} curl -s -o /dev/null -w '%{http_code}' http://localhost:{$port} 2>/dev/null || echo '000'"));
-            $publicCheck = trim($this->ssh->exec("curl -k -s -o /dev/null -w '%{http_code}' https://{$domain} --max-time 2 2>/dev/null || echo '000'"));
-
-            $isLocalOk = in_array($localCheck, ['200', '301', '302', '304']);
-            $isPublicOk = in_array($publicCheck, ['200', '301', '302', '304']);
-
-            if ($isLocalOk || $isPublicOk) {
-                $active = true;
-                $source = $isPublicOk ? "Public Domain" : "Localhost";
-                $code = $isPublicOk ? $publicCheck : $localCheck;
-                $this->streamer->log($deployment, " App responsive via {$source} (HTTP {$code})", LogType::DEBUG);
+            if ($health === 'healthy') {
+                $this->streamer->log($deployment, "✅ Container is healthy (Docker Healthcheck Passed)", LogType::SUCCESS);
+                $success = true;
                 break;
             }
 
-            $this->streamer->log($deployment, "⏳ Waiting for response... (Local: {$localCheck}, Public: {$publicCheck})", LogType::DEBUG);
-            sleep(5);
+            if ($status !== 'running') {
+                $this->streamer->log($deployment, "❌ Container crashed or not running (Status: {$status})", LogType::ERROR);
+                break; 
+            }
+
+            // 2. Fallback Health Check (HTTP)
+            $publicCheck = trim($this->ssh->exec("curl -k -s -o /dev/null -w '%{http_code}' https://{$domain} --max-time 2 2>/dev/null || echo '000'"));
+            if (in_array($publicCheck, ['200', '301', '302', '304', '401', '405'])) {
+                $this->streamer->log($deployment, "✅ App is responsive (HTTP {$publicCheck})", LogType::SUCCESS);
+                $success = true;
+                break;
+            }
+
+            $this->streamer->log($deployment, "⏳ Waiting for app to become healthy... ({$attempt}/{$maxAttempts})", LogType::DEBUG);
+            sleep(2);
         }
 
-        if (!$active) {
-            $logs = $this->ssh->exec("docker logs {$containerName} --tail 50 2>&1");
-            $this->streamer->log($deployment, "📋 Container logs:\n{$logs}", LogType::ERROR);
-            throw new \App\Exceptions\Deployment\NonRetryableException("Health check failed after 90s. The app is not responding.");
+        if (!$success) {
+            $logs = $this->ssh->exec("docker logs {$appSlug} --tail 50 2>&1");
+            $this->streamer->log($deployment, "📋 Last logs before failure:\n{$logs}", LogType::ERROR);
+            throw new \App\Exceptions\Deployment\NonRetryableException("Application failed to become healthy in time.");
         }
-
-        $this->streamer->log($deployment, " Déploiement validé avec succès.", LogType::SUCCESS);
     }
 
+
     /**
-     * Nettoie les images résiduelles pour économiser l'espace disque sur le VPS.
+     * Nettoie les images résiduelles.
      */
     protected function cleanup(Deployment $deployment): void
     {
         try {
-            $this->streamer->log($deployment, "Pruning unused Docker images on VPS...", LogType::DEBUG);
             $this->ssh->exec("docker image prune -f");
         } catch (Exception $e) {
-            // Un échec de cleanup ne doit pas faire échouer le déploiement
-            $this->streamer->log($deployment, "Cleanup warning: " . $e->getMessage(), LogType::DEBUG);
+            Log::warning("Cleanup failed: " . $e->getMessage());
         }
     }
 
@@ -271,7 +259,6 @@ class DeploymentOrchestrator
             'finished_at' => $isFinished ? now() : null
         ]);
 
-        // Diffusion du statut en temps réel via WebSocket
         event(new \App\Events\DeploymentStatusUpdatedEvent(
             $deployment->id,
             $app->id,
@@ -279,136 +266,59 @@ class DeploymentOrchestrator
             !$isFinished
         ));
     }
+    
     /**
-     * Résout la version de Node.js à utiliser en lisant le package.json du projet.
+     * Résout la version de Node.js.
      */
     protected function resolveNodeVersion(string $appPath, Deployment $deployment): string
     {
-        // Vite 8+ exige Node 20.19+ ou 22.12+ — on cible 22 pour être safe
         $fallbackVersion = "22";
-
         try {
-            $this->streamer->log($deployment, "🔍 Détection de la version Node.js requise...", LogType::DEBUG);
-
-            // On lit le package.json directement sur le VPS
-            $json = $this->ssh->exec("cat \"{$appPath}/package.json\" 2>/dev/null || echo 'not found'");
-
-            if (trim($json) === 'not found' || empty($json)) {
-                $this->streamer->log($deployment, "package.json non trouvé. Utilisation de Node {$fallbackVersion}.", LogType::DEBUG);
-                return $fallbackVersion;
-            }
+            $json = $this->ssh->exec("cat \"{$appPath}/package.json\" 2>/dev/null || echo 'not'");
+            if (trim($json) === 'not') return $fallbackVersion;
 
             $data = json_decode($json, true);
-
-            // Détection Vite 8+ dans devDependencies ou dependencies
-            $allDeps = array_merge(
-                $data['dependencies'] ?? [],
-                $data['devDependencies'] ?? []
-            );
-
-            if (isset($allDeps['vite'])) {
-                $viteConstraint = ltrim($allDeps['vite'], '^~>=');
-                $viteMajor = (int) explode('.', $viteConstraint)[0];
-                if ($viteMajor >= 8) {
-                    $this->streamer->log($deployment, "⚡ Vite {$viteMajor} détecté → Node 22 requis (20.18 insuffisant).", LogType::DEBUG);
-                    return "22";
-                }
-            }
-
-            // Lecture du champ engines.node
             $enginesNode = data_get($data, 'engines.node');
 
-            if (!$enginesNode) {
-                $this->streamer->log($deployment, "Aucune version Node dans engines. Utilisation de Node {$fallbackVersion}.", LogType::DEBUG);
-                return $fallbackVersion;
+            if ($enginesNode && preg_match('/(\d+)/', $enginesNode, $matches)) {
+                $v = $matches[1];
+                return intval($v) < 20 ? $fallbackVersion : $v;
             }
-
-            // Extraction de la version majeure via Regex
-            if (preg_match('/(\d+)(?:\.\d+)*/', $enginesNode, $matches)) {
-                $version = $matches[1];
-
-                // Sécurité : Si la version détectée est < 20, on conseille 22
-                if (intval($version) < 20) {
-                    $this->streamer->log($deployment, "⚠️ Node {$version} trop ancien. Forçage vers Node {$fallbackVersion}.", LogType::DEBUG);
-                    return $fallbackVersion;
-                }
-
-                $this->streamer->log($deployment, " Node {$version} sélectionné.", LogType::INFO);
-                return $version;
-            }
-
             return $fallbackVersion;
         } catch (\Exception $e) {
-            Log::warning("[Orchestrator] Node resolution failed: " . $e->getMessage());
             return $fallbackVersion;
         }
     }
 
     /**
-     * Vérifie que Traefik est actif sur le serveur. Le lance si absent.
-     * Utilise des arguments CLI pour Traefik v3 (plus robuste que le YAML).
+     * Vérifie Traefik.
      */
     protected function ensureTraefik(Server $server, Deployment $deployment): void
     {
-        $this->streamer->log($deployment, "🔍 Stabilisation de l'infrastructure standard (Traefik)...", LogType::DEBUG);
+        $this->streamer->log($deployment, "🔍 Infrastructure: Ensuring Traefik v3...", LogType::DEBUG);
 
-        $baseDir = "/var/www/vpsly/traefik";
+        $this->ssh->exec("docker network create vpsly 2>/dev/null || true");
 
-        // 0. S'assurer que les dossiers existent avec les bonnes permissions
-        $this->ssh->exec("mkdir -p \"{$baseDir}/acme\"");
-        $this->ssh->exec("touch \"{$baseDir}/acme/acme.json\" && chmod 600 \"{$baseDir}/acme/acme.json\"");
-
-        // S'assurer que le réseau global existe
-        $this->ssh->exec("docker network create vpsly_network 2>/dev/null || true");
-
-        // 1. Détection de l'état actuel (Standard name: traefik)
-        $check = $this->ssh->exec("docker ps --format '{{.Names}}' | grep -E '^traefik$' || true");
-        $isRunning = !empty(trim($check));
-
-        // On vérifie si c'est déjà la version CLI avec l'API modernisée (dans l'ENV) ou s'il faut migrer
-        $env = $isRunning ? $this->ssh->exec("docker inspect traefik --format '{{range .Config.Env}}{{println .}}{{end}}'") : "";
-        $cmd = $isRunning ? $this->ssh->exec("docker inspect traefik --format '{{.Config.Cmd}}'") : "";
-
-        $isModern = str_contains($cmd, '--providers.docker') && str_contains($env, 'DOCKER_API_VERSION=1.41');
-
-        // 2. Action corrective : Migration ou Installation
-        if (!$isRunning || !$isModern) {
-            $this->streamer->log($deployment, "⚠️ Migration vers l'instance standard Traefik v3 (CLI Mode)...", LogType::INFO);
-
-            // Nettoyer tous les anciens emplacements et noms possibles
-            $this->ssh->exec("docker rm -f traefik deploykit-gateway vpsly-traefik 2>/dev/null || true");
-            $this->ssh->exec("rm -f /etc/traefik/traefik.yml 2>/dev/null || true");
-
-            // Lancement du standard avec les arguments optimisés pour la v3
+        $check = $this->ssh->exec("docker ps --format '{{.Names}}' | grep '^traefik$' || true");
+        if (empty(trim($check))) {
+            $this->streamer->log($deployment, "Installing Traefik...", LogType::INFO);
             $command = implode(' ', [
                 'docker run -d --name traefik --restart always',
-                '--network vpsly_network',
+                '--network vpsly',
                 '-p 80:80 -p 443:443',
                 '-v /var/run/docker.sock:/var/run/docker.sock:ro',
-                "-v \"{$baseDir}/acme:/acme\"",
-                '-e DOCKER_API_VERSION=1.41',
                 'traefik:v3.6',
                 '--api.insecure=true',
                 '--providers.docker=true',
                 '--providers.docker.exposedbydefault=false',
-                '--providers.docker.network=vpsly_network',
+                '--providers.docker.network=vpsly',
                 '--entrypoints.web.address=:80',
                 '--entrypoints.web.http.redirections.entryPoint.to=websecure',
                 '--entrypoints.web.http.redirections.entryPoint.scheme=https',
-                '--entrypoints.websecure.address=:443',
-                '--certificatesresolvers.letsencrypt.acme.email=admin@vpsly.io',
-                '--certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json',
-                '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web'
+                '--entrypoints.websecure.address=:443'
             ]);
-
             $this->ssh->exec($command);
-            sleep(2);
-        } else {
-            // Déjà standard, on s'assure qu'il est bien démarré
-            $this->ssh->exec("docker start traefik 2>/dev/null || true");
         }
-
-        $this->streamer->log($deployment, " Infrastructure réseau standardisée (traefik).", LogType::SUCCESS);
     }
 
     /**
