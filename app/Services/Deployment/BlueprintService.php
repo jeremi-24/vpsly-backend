@@ -39,8 +39,13 @@ class BlueprintService
         ];
 
         if ($isPhp) {
-            $envVars['NIXPACKS_PHP_ROOT_DIR'] = '/app/public';
-            $envVars['NIXPACKS_PHP_FALLBACK_PATH'] = '/index.php';
+            // Nixpacks détecte nativement Laravel/PHP et configure le root sur /public.
+            // On évite de forcer NIXPACKS_PHP_FALLBACK_PATH car cela peut créer des doublons de "location /" dans nginx.conf
+            
+            // Génération automatique de APP_KEY si absente (requis par Laravel)
+            if (!$app->environmentVariables()->where('key', 'APP_KEY')->exists()) {
+                $envVars['APP_KEY'] = 'base64:' . base64_encode(random_bytes(32));
+            }
         } else {
             $envVars['NODE_ENV'] = 'production';
             $envVars['PORT'] = '3000';
