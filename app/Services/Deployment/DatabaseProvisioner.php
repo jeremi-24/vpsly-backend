@@ -90,10 +90,15 @@ class DatabaseProvisioner
         } elseif ($isMysql) {
             $env = [
                 "MYSQL_ROOT_PASSWORD={$database->postgres_password}",
-                "MYSQL_USER={$database->postgres_user}",
-                "MYSQL_PASSWORD={$database->postgres_password}",
                 "MYSQL_DATABASE={$database->postgres_db}",
             ];
+
+            // MYSQL_USER ne peut pas être 'root' dans l'image officielle MySQL
+            if ($database->postgres_user !== 'root') {
+                $env[] = "MYSQL_USER={$database->postgres_user}";
+                $env[] = "MYSQL_PASSWORD={$database->postgres_password}";
+            }
+
             $internalPort = 3306;
             $mountPath = '/var/lib/mysql';
         } elseif ($isRedis) {
