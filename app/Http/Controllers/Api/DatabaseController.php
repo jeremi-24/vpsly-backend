@@ -14,7 +14,7 @@ class DatabaseController extends Controller
 {
     public function index(Request $request)
     {
-        return StandalonePostgresql::with('server')->latest()->get();
+        return StandalonePostgresql::with('server')->latest()->get()->each->append(['internal_db_url', 'external_db_url']);
     }
 
     public function store(Request $request)
@@ -44,7 +44,8 @@ class DatabaseController extends Controller
 
     public function show(StandalonePostgresql $database)
     {
-        return $database->load('server');
+        return $database->load(['server', 'persistentStorages'])
+            ->append(['internal_db_url', 'external_db_url']);
     }
 
     /**

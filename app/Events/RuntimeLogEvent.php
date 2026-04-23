@@ -15,17 +15,18 @@ class RuntimeLogEvent implements ShouldBroadcast
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
-        public int $applicationId,
+        public int $resourceId,
         public string $message,
+        public string $channelName = null,
         public string $type = 'info'
-    ) {}
+    ) {
+        $this->channelName = $channelName ?? "application.{$this->resourceId}.runtime-logs";
+    }
 
     public function broadcastOn(): array
     {
-        // Canal public car les permissions applicatives sont gérées en amont 
-        // ou canal privé si on veut renforcer la sécurité (nécessite auth front).
         return [
-            new Channel("application.{$this->applicationId}.runtime-logs"),
+            new Channel($this->channelName),
         ];
     }
 

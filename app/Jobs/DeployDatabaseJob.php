@@ -31,6 +31,7 @@ class DeployDatabaseJob implements ShouldQueue
         
         try {
             $provisioner->provision($this->database);
+            $this->database->update(['status' => 'running']);
             Log::info("[Job] Successfully deployed database: {$this->database->name}");
         } catch (\Exception $e) {
             Log::error("[Job] Deployment failed for database {$this->database->name}: " . $e->getMessage());

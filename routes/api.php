@@ -76,6 +76,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [DatabaseController::class, 'store']);
         Route::get('/{database}', [DatabaseController::class, 'show']);
         Route::post('/{database}/deploy', [DatabaseController::class, 'deploy']);
+
+        // Logs de Runtime des Bases de données
+        Route::prefix('{database}/logs')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\DatabaseLogController::class, 'index']);
+            Route::post('/stream', [\App\Http\Controllers\Api\DatabaseLogController::class, 'stream']);
+        });
     });
 });
 
