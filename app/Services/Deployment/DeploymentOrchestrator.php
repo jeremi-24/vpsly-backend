@@ -32,7 +32,7 @@ class DeploymentOrchestrator
         Log::info("[Deploy] Starting deployment for App: {$app->name} (ID: {$app->id}) on Server: {$server->ip}");
 
         // STEP 0: INITIAL FEEDBACK
-        $this->streamer->log($deployment, "🚀 Deployment process started for {$app->name}...", LogType::INFO);
+        $this->streamer->log($deployment, " Deployment process started for {$app->name}...", LogType::INFO);
         $this->streamer->flush($deployment); // Force immediate feedback
 
         // Verrouillage de l'application
@@ -95,7 +95,7 @@ class DeploymentOrchestrator
             // STEP 4: DEPLOYING (Docker Compose)
             $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
             $this->streamer->log($deployment, "Génération de la configuration Docker Compose...", LogType::INFO);
-            
+
             // BACKUP horodaté du .env existant (si présent)
             $this->ssh->exec("cd \"{$appPath}\" && cp .env .env.backup.$(date +%s) 2>/dev/null || true");
 
@@ -239,7 +239,7 @@ class DeploymentOrchestrator
     protected function updateStatus(Application $app, Deployment $deployment, DeploymentStatus $status): void
     {
         $isFinished = ($status === DeploymentStatus::SUCCESS || $status === DeploymentStatus::FAILED);
-        
+
         $app->update([
             'status' => $status->value,
             'is_deploying' => !$isFinished,

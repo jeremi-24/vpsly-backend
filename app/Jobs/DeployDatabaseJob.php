@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Events\DatabaseStatusUpdatedEvent;
 use App\Models\StandalonePostgresql;
 use App\Services\Deployment\DatabaseProvisioner;
 use Illuminate\Bus\Queueable;
@@ -30,12 +31,19 @@ class DeployDatabaseJob implements ShouldQueue
         Log::info("[Job] Starting deployment for database: {$this->database->name}");
         
         try {
+             // Statut initial déjà mis à jour dans le controller, mais on peut le rediffuser
+            event(new DatabaseStatusUpdatedEvent($this->database));
+
             $provisioner->provision($this->database);
+            
             $this->database->update(['status' => 'running']);
+            event(new DatabaseStatusUpdatedEvent($this->database));
+
             Log::info("[Job] Successfully deployed database: {$this->database->name}");
         } catch (\Exception $e) {
             Log::error("[Job] Deployment failed for database {$this->database->name}: " . $e->getMessage());
             $this->database->update(['status' => 'failed']);
+            event(new DatabaseStatusUpdatedEvent($this->database));
             throw $e;
         }
     }

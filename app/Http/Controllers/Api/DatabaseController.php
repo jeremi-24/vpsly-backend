@@ -65,4 +65,26 @@ class DatabaseController extends Controller
             'database' => $database
         ]);
     }
+
+    /**
+     * Bascule l'accès public de la base de données.
+     */
+    public function togglePublic(StandalonePostgresql $database)
+    {
+        $database->is_public = !$database->is_public;
+        
+        if ($database->is_public && !$database->public_port) {
+            // Assignation d'un port public si activé
+            $lastPort = StandalonePostgresql::where('server_id', $database->server_id)
+                ->whereNotNull('public_port')
+                ->max('public_port');
+                
+            $database->public_port = $lastPort ? $lastPort + 1 : 5432;
+        }
+        
+        $database->save();
+        
+        // On redéploie pour appliquer le changement
+        return $this->deploy($database->id);
+    }
 }

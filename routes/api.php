@@ -76,6 +76,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [DatabaseController::class, 'store']);
         Route::get('/{database}', [DatabaseController::class, 'show']);
         Route::post('/{database}/deploy', [DatabaseController::class, 'deploy']);
+        Route::patch('/{database}/toggle-public', [DatabaseController::class, 'togglePublic']);
 
         // Logs de Runtime des Bases de données
         Route::prefix('{database}/logs')->group(function () {

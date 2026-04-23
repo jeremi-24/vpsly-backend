@@ -11,7 +11,8 @@ class NixpacksService
     public function __construct(
         protected SSHService $ssh,
         protected LogStreamer $logStreamer
-    ) {}
+    ) {
+    }
 
     /**
      * S'assure que Nixpacks est installé sur le serveur.
@@ -19,15 +20,15 @@ class NixpacksService
     public function ensureInstalled(Server $server, Deployment $deployment): void
     {
         $this->logStreamer->log($deployment, "🔍 Vérification de Nixpacks sur le serveur...");
-        
+
         $check = $this->ssh->exec("command -v nixpacks || echo 'not found'");
-        
+
         if (str_contains($check, 'not found')) {
             $this->logStreamer->log($deployment, "⚠️ Nixpacks non trouvé. Installation en cours...");
-            
+
             // Installation sécurisée via curl | bash (script officiel)
             $this->ssh->exec("curl -sSL https://nixpacks.com/install.sh | bash");
-            
+
             // Re-vérification
             $checkAgain = $this->ssh->exec("command -v nixpacks || echo 'failed'");
             if (str_contains($checkAgain, 'failed')) {
@@ -45,29 +46,29 @@ class NixpacksService
     public function getPlan(Server $server, Deployment $deployment, string $appPath, ?string $nodeVersion = null): array
     {
         $this->logStreamer->log($deployment, "🔍 Analyse de la structure du projet via Nixpacks...", \App\Enums\LogType::INFO);
-        
+
         $env = "";
         if ($nodeVersion) {
             $env = "NIXPACKS_NODE_VERSION={$nodeVersion} ";
         }
 
         $command = "cd \"{$appPath}\" && {$env}nixpacks plan . --format json";
-        
+
         try {
             $json = $this->ssh->exec($command);
-            
+
             if (empty($json) || str_contains($json, 'error')) {
                 throw new \Exception("Nixpacks n'a pas pu générer de plan pour ce projet. Vérifiez que le répertoire n'est pas vide.");
             }
 
             $plan = json_decode($json, true);
-            
+
             if (json_last_error() !== JSON_ERROR_NONE) {
                 // Si le JSON est invalide, on tente de nettoyer
                 if (preg_match('/\{.*\}/s', $json, $matches)) {
                     $plan = json_decode($matches[0], true);
                 }
-                
+
                 if (!$plan) {
                     throw new \Exception("Erreur lors de la lecture du plan Nixpacks : " . json_last_error_msg());
                 }
@@ -88,22 +89,22 @@ class NixpacksService
      */
     public function build(Server $server, Deployment $deployment, string $appPath, string $imageName, ?string $nodeVersion = null): void
     {
-        $this->logStreamer->log($deployment, "🚀 Lancement du build universel (Nixpacks)...", \App\Enums\LogType::INFO);
-        
+        $this->logStreamer->log($deployment, " Lancement du build universel (Nixpacks)...", \App\Enums\LogType::INFO);
+
         $env = "";
         if ($nodeVersion) {
             $env = "NIXPACKS_NODE_VERSION={$nodeVersion} ";
         }
 
         $command = "cd \"{$appPath}\" && {$env}nixpacks build . --name \"{$imageName}\" --inline-cache";
-        
+
         Log::info("[Nixpacks] Running build: {$command}");
 
         try {
-            $this->ssh->stream($command, function($line) use ($deployment) {
+            $this->ssh->stream($command, function ($line) use ($deployment) {
                 $this->logStreamer->log($deployment, $line, \App\Enums\LogType::DEBUG);
             });
-            
+
             $this->logStreamer->log($deployment, "📦 Image Docker buildée avec succès : {$imageName}", \App\Enums\LogType::SUCCESS);
         } catch (\Exception $e) {
             $this->logStreamer->log($deployment, "❌ Échec du build Nixpacks. Vérifiez les erreurs ci-dessus (TypeScript, Build scripts, etc.).", \App\Enums\LogType::ERROR);
