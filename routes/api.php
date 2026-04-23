@@ -7,6 +7,7 @@ use App\Http\Controllers\ApplicationController;
 use App\Http\Controllers\DeploymentController;
 use App\Http\Controllers\Api\EnvironmentVariableController;
 use App\Http\Controllers\Api\ApplicationLogController;
+use App\Http\Controllers\Api\DatabaseController;
 
 // Si vous utilisez Sanctum avec Auth : Route::middleware('auth:sanctum')->get('/user', function () { ... });
 
@@ -32,6 +33,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Gestion des Applications
     Route::prefix('applications')->group(function () {
+        // ... (routes applications)
         Route::get('/', [ApplicationController::class, 'index']);
         Route::post('/', [ApplicationController::class, 'store']);
         Route::get('/{id}', [ApplicationController::class, 'show']);
@@ -66,6 +68,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/user', [\App\Http\Controllers\Api\GitHubApiController::class, 'user']);
         Route::get('/repositories', [\App\Http\Controllers\Api\GitHubApiController::class, 'repositories']);
         Route::get('/branches', [\App\Http\Controllers\Api\GitHubApiController::class, 'branches']);
+    });
+
+    // Gestion des Bases de données
+    Route::prefix('databases')->group(function () {
+        Route::get('/', [DatabaseController::class, 'index']);
+        Route::post('/', [DatabaseController::class, 'store']);
+        Route::get('/{database}', [DatabaseController::class, 'show']);
+        Route::post('/{database}/deploy', [DatabaseController::class, 'deploy']);
     });
 });
 
