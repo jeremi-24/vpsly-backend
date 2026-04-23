@@ -34,9 +34,9 @@ class NixpacksService
             if (str_contains($checkAgain, 'failed')) {
                 throw new \Exception("L'installation de Nixpacks a échoué sur le serveur.");
             }
-            $this->logStreamer->log($deployment, "✅ Nixpacks installé avec succès.");
+            $this->logStreamer->log($deployment, " Nixpacks installé avec succès.");
         } else {
-            $this->logStreamer->log($deployment, "✅ Nixpacks est déjà présent sur le serveur.");
+            $this->logStreamer->log($deployment, " Nixpacks est déjà présent sur le serveur.");
         }
     }
 

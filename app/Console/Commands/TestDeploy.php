@@ -79,7 +79,7 @@ class TestDeploy extends Command
         // Récupération de l'état final
         $deployment->refresh();
         if ($deployment->status === 'success') {
-            $this->info("\n✅ Résultat : " . strtoupper($deployment->status));
+            $this->info("\n Résultat : " . strtoupper($deployment->status));
         } else {
             $this->error("\n❌ Résultat : " . strtoupper($deployment->status));
         }

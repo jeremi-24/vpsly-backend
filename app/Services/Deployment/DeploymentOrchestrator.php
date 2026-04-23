@@ -225,7 +225,7 @@ class DeploymentOrchestrator
                 $active = true;
                 $source = $isPublicOk ? "Public Domain" : "Localhost";
                 $code = $isPublicOk ? $publicCheck : $localCheck;
-                $this->streamer->log($deployment, "✅ App responsive via {$source} (HTTP {$code})", LogType::DEBUG);
+                $this->streamer->log($deployment, " App responsive via {$source} (HTTP {$code})", LogType::DEBUG);
                 break;
             }
 
@@ -239,7 +239,7 @@ class DeploymentOrchestrator
             throw new \App\Exceptions\Deployment\NonRetryableException("Health check failed after 90s. The app is not responding.");
         }
 
-        $this->streamer->log($deployment, "✅ Déploiement validé avec succès.", LogType::SUCCESS);
+        $this->streamer->log($deployment, " Déploiement validé avec succès.", LogType::SUCCESS);
     }
 
     /**
@@ -333,7 +333,7 @@ class DeploymentOrchestrator
                     return $fallbackVersion;
                 }
 
-                $this->streamer->log($deployment, "✅ Node {$version} sélectionné.", LogType::INFO);
+                $this->streamer->log($deployment, " Node {$version} sélectionné.", LogType::INFO);
                 return $version;
             }
 
@@ -408,7 +408,7 @@ class DeploymentOrchestrator
             $this->ssh->exec("docker start traefik 2>/dev/null || true");
         }
 
-        $this->streamer->log($deployment, "✅ Infrastructure réseau standardisée (traefik).", LogType::SUCCESS);
+        $this->streamer->log($deployment, " Infrastructure réseau standardisée (traefik).", LogType::SUCCESS);
     }
 
     /**
