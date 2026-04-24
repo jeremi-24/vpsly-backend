@@ -107,13 +107,17 @@ class NixpacksService
         Log::info("[Nixpacks] Running build: {$command}");
 
         try {
-            $this->ssh->stream($command, function ($line) use ($deployment) {
+            $lastLines = [];
+            $this->ssh->stream($command, function ($line) use ($deployment, &$lastLines) {
                 $this->logStreamer->log($deployment, $line, \App\Enums\LogType::DEBUG);
+                $lastLines[] = $line;
+                if (count($lastLines) > 20) array_shift($lastLines);
             });
 
             $this->logStreamer->log($deployment, "📦 Image Docker buildée avec succès : {$imageName}", \App\Enums\LogType::SUCCESS);
         } catch (\Exception $e) {
-            $this->logStreamer->log($deployment, "❌ Échec du build Nixpacks. Vérifiez les erreurs ci-dessus (TypeScript, Build scripts, etc.).", \App\Enums\LogType::ERROR);
+            $context = implode("\n", $lastLines);
+            $this->logStreamer->log($deployment, "❌ Échec du build Nixpacks. Dernières lignes :\n{$context}", \App\Enums\LogType::ERROR);
             throw $e;
         }
     }

@@ -29,7 +29,7 @@ class CreateAtomicStack
             'server_id' => $server->id,
             'user_id' => $data['user_id'],
             'status' => 'preparing',
-            'build_pack' => 'nixpacks',
+            'build_pack' => "nixpacks:{$preset}",
             'is_deploying' => true,
         ]);
 

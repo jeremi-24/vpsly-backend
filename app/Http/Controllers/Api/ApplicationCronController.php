@@ -56,15 +56,11 @@ class ApplicationCronController extends Controller
     {
         try {
             $this->cronService->sync($application);
-            return response()->json([
-                'message' => 'Crons synchronized successfully',
-                'application' => $application->fresh(),
-                'tasks' => $application->scheduledTasks()->get()
-            ]);
+            return $this->index($application);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Sync failed: ' . $e->getMessage(),
-                'error' => $application->fresh()->last_cron_sync_error
+                'last_cron_sync_error' => $application->fresh()->last_cron_sync_error
             ], 500);
         }
     }
