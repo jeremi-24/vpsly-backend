@@ -65,11 +65,14 @@ class ApplicationController extends Controller
     public function show($id)
     {
         $user = auth()->user() ?? \App\Models\User::first();
-        $app = Application::with(['server', 'deployments' => function($q) {
-            $q->latest()->limit(1)->with('logs');
-        }])
-        ->where('user_id', $user->id)
-        ->findOrFail($id);
+        $app = Application::with([
+                'server',
+                'deployments' => fn($q) => $q->latest()->limit(5),
+                'environmentVariables',
+                'databases',
+            ])
+            ->where('user_id', $user->id)
+            ->findOrFail($id);
 
         return response()->json($app);
     }

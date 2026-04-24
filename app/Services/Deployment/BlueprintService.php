@@ -130,7 +130,7 @@ class BlueprintService
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $domain = "{$appSlug}.{$serverIp}.sslip.io";
 
-        // Limites de ressources (Copy of Coolify)
+        // Limites de ressources
         $memoryLimit = "512MB";
         $cpuLimit = "0.5";
 
@@ -152,7 +152,7 @@ class BlueprintService
                     'interval' => '10s',
                     'timeout' => '5s',
                     'retries' => 3,
-                    'start_period' => '10s'
+                    'start_period' => '20s'
                 ],
                 'deploy' => [
                     'resources' => [
@@ -165,7 +165,44 @@ class BlueprintService
             ]
         ];
 
-        // Intégration des volumes persistants
+        // LOGIQUE COMBO : Injection de la base de données liée (si sur le même serveur)
+        $database = $app->databases()->where('server_id', $app->server_id)->first();
+        if ($database) {
+            $dbSlug = $database->uuid;
+            $dbType = str_contains(strtolower($database->image), 'mysql') ? 'mysql' : 'postgres';
+            $internalPort = $dbType === 'mysql' ? 3306 : 5432;
+
+            $services[$dbSlug] = [
+                'container_name' => $dbSlug,
+                'image' => $database->image ?: ($dbType === 'mysql' ? 'mysql:8' : 'postgres:15'),
+                'restart' => 'always',
+                'networks' => ['vpsly'],
+                'environment' => [
+                    ($dbType === 'mysql' ? 'MYSQL_DATABASE' : 'POSTGRES_DB') => $database->postgres_db,
+                    ($dbType === 'mysql' ? 'MYSQL_USER' : 'POSTGRES_USER') => $database->postgres_user,
+                    ($dbType === 'mysql' ? 'MYSQL_PASSWORD' : 'POSTGRES_PASSWORD') => $database->postgres_password,
+                    ($dbType === 'mysql' ? 'MYSQL_ROOT_PASSWORD' : null) => $database->postgres_password,
+                ],
+                'volumes' => [
+                    "{$dbSlug}_data:" . ($dbType === 'mysql' ? '/var/lib/mysql' : '/var/lib/postgresql/data')
+                ],
+                'healthcheck' => [
+                    'test' => $dbType === 'mysql' 
+                        ? ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+                        : ["CMD-SHELL", "pg_isready -U {$database->postgres_user} -d {$database->postgres_db}"],
+                    'interval' => '5s',
+                    'timeout' => '5s',
+                    'retries' => 5
+                ]
+            ];
+
+            // On fait dépendre l'app de la DB
+            $services[$appSlug]['depends_on'] = [
+                $dbSlug => ['condition' => 'service_healthy']
+            ];
+        }
+
+        // Intégration des volumes persistants pour l'App
         $volumes = $app->persistentVolumes()->get();
         if ($volumes->count() > 0) {
             $services[$appSlug]['volumes'] = [];
@@ -175,7 +212,7 @@ class BlueprintService
             }
         }
 
-        // Configuration Réseau
+        // Configuration Réseau et Volumes nommés pour la DB
         $compose = [
             'services' => $services,
             'networks' => [
@@ -186,8 +223,13 @@ class BlueprintService
             ]
         ];
 
+        if ($database) {
+            $compose['volumes']["{$database->uuid}_data"] = ['driver' => 'local'];
+        }
+
         return \Symfony\Component\Yaml\Yaml::dump($compose, 10);
     }
+
 
 
     protected function writeRemoteFile(string $filePath, string $content): void
