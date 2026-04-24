@@ -199,9 +199,30 @@ class DeploymentOrchestrator
         } catch (\Throwable $e) {
             $msg = "❌ DEPLOYMENT FAILED: " . $e->getMessage();
             $this->streamer->log($deployment, $msg, LogType::ERROR);
-            $this->updateStatus($app, $deployment, DeploymentStatus::FAILED);
+            
+            try {
+                $this->updateStatus($app, $deployment, DeploymentStatus::FAILED);
+            } catch (\Throwable $dbError) {
+                // Si la DB est lockée, on ne peut rien faire de plus ici
+            }
+            
             throw $e;
         } finally {
+            // SÉCURITÉ ULTIME : On s'assure que le loader s'arrête quoi qu'il arrive
+            try {
+                $app->update(['is_deploying' => false]);
+                
+                // On notifie le front via l'event si ce n'est pas déjà fait
+                event(new \App\Events\DeploymentStatusUpdatedEvent(
+                    $deployment->id,
+                    $app->id,
+                    $app->status,
+                    false
+                ));
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error("Failsafe unlock failed: " . $e->getMessage());
+            }
+            
             $this->streamer->flush($deployment);
             $this->ssh->disconnect();
         }

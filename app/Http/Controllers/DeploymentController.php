@@ -38,6 +38,8 @@ class DeploymentController extends Controller
         }
 
         // 1. Initialisation de la State Machine
+        $app->update(['is_deploying' => true]);
+
         $deployment = Deployment::create([
             'application_id' => $app->id,
             'status' => 'pending',
@@ -48,7 +50,8 @@ class DeploymentController extends Controller
 
         return response()->json([
             'message' => 'Deployment queued successfully',
-            'deployment' => $deployment
+            'deployment' => $deployment,
+            'application' => $app->fresh()
         ], 202);
     }
 
