@@ -64,6 +64,15 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/', [\App\Http\Controllers\Api\ApplicationVolumeController::class, 'store']);
             Route::delete('/{id}', [\App\Http\Controllers\Api\ApplicationVolumeController::class, 'destroy']);
         });
+
+        // Crons (Scheduled Tasks)
+        Route::prefix('{application}/crons')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\ApplicationCronController::class, 'index']);
+            Route::post('/', [\App\Http\Controllers\Api\ApplicationCronController::class, 'store']);
+            Route::put('/toggle-laravel', [\App\Http\Controllers\Api\ApplicationCronController::class, 'toggleLaravel']);
+            Route::delete('/{id}', [\App\Http\Controllers\Api\ApplicationCronController::class, 'destroy']);
+            Route::post('/sync', [\App\Http\Controllers\Api\ApplicationCronController::class, 'sync']);
+        });
     });
 
 

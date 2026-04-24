@@ -15,7 +15,14 @@ class Application extends Model
         return [
             'is_deploying' => 'boolean',
             'last_deployed_at' => 'datetime',
+            'has_laravel_scheduler' => 'boolean',
+            'last_cron_synced_at' => 'datetime',
         ];
+    }
+
+    public function scheduledTasks(): HasMany
+    {
+        return $this->hasMany(ScheduledTask::class);
     }
 
     public function user(): BelongsTo

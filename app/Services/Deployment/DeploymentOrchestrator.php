@@ -19,7 +19,8 @@ class DeploymentOrchestrator
         protected GitService $git,
         protected NixpacksService $nixpacks,
         protected BlueprintService $blueprint,
-        protected LogStreamer $streamer
+        protected LogStreamer $streamer,
+        protected CronService $cron
     ) {
     }
 
@@ -177,6 +178,15 @@ class DeploymentOrchestrator
 
             // STEP 5: VERIFY (Health Check)
             $this->verify($app, $deployment, $appPath, $nixpacksPlan);
+
+            // STEP 6: SYNC CRONS (Automated Sync)
+            try {
+                $this->streamer->log($deployment, "⏰ Synchronizing scheduled tasks...", LogType::INFO);
+                $this->cron->sync($app);
+                $this->streamer->log($deployment, "✅ Scheduled tasks synchronized.", LogType::INFO);
+            } catch (Exception $e) {
+                $this->streamer->log($deployment, "⚠️ Cron sync failed: " . $e->getMessage(), LogType::WARNING);
+            }
 
             // FINAL STEP: SUCCESS
             $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
