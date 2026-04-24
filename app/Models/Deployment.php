@@ -22,6 +22,7 @@ class Deployment extends Model
     protected $casts = [
         'started_at' => 'datetime',
         'finished_at' => 'datetime',
+        'logs' => 'array',
     ];
 
     public function application(): BelongsTo
@@ -32,35 +33,35 @@ class Deployment extends Model
     /**
      * Logique de Coolify pour ajouter un log de manière atomique.
      */
-    public function addLogEntry(string $message, string $type = 'stdout', bool $hidden = false)
+    public function addLogEntry(string $message, string $type = 'info', bool $hidden = false)
     {
-        if ($type === 'error') {
-            $type = 'stderr';
-        }
-        
         $message = str($message)->trim();
-        
-        $newLogEntry = [
-            'command' => null,
-            'output' => $this->redactSensitiveInfo($message),
-            'type' => $type,
-            'timestamp' => \Illuminate\Support\Carbon::now('UTC'),
-            'hidden' => $hidden,
-            'batch' => 1,
+        if ($message->isEmpty()) return;
+
+        // Mappage de compatibilité (Supporte le nouveau style et le style Coolify legacy)
+        $mappedType = match ($type) {
+            'error', 'stderr' => 'error',
+            'success' => 'success',
+            default => 'info',
+        };
+
+        $newEntry = [
+            'type' => $mappedType,
+            'message' => $this->redactSensitiveInfo($message),
+            'timestamp' => now()->toIso8601String(),
         ];
 
-        // Transaction pour éviter les collisions de logs (Copy of Coolify)
-        \Illuminate\Support\Facades\DB::transaction(function () use ($newLogEntry) {
+        // Transaction pour éviter les collisions de logs
+        \Illuminate\Support\Facades\DB::transaction(function () use ($newEntry) {
             $this->refresh();
-
-            if ($this->logs) {
-                $previousLogs = json_decode($this->logs, true) ?? [];
-                $newLogEntry['order'] = count($previousLogs) + 1;
-                $previousLogs[] = $newLogEntry;
-                $this->logs = json_encode($previousLogs);
-            } else {
-                $this->logs = json_encode([$newLogEntry]);
+            
+            $currentLogs = $this->logs ?? [];
+            if (!is_array($currentLogs)) {
+                $currentLogs = [];
             }
+            
+            $currentLogs[] = $newEntry;
+            $this->logs = $currentLogs;
 
             $this->saveQuietly();
         });

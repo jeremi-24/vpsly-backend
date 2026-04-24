@@ -29,37 +29,27 @@ class ApplicationController extends Controller
             'repo_url' => 'required|url',
             'branch' => 'nullable|string',
             'domain' => 'nullable|string',
+            'preset' => 'nullable|string', // Ajout du preset
         ]);
 
         $user = auth()->user() ?? User::first();
 
-        // Création de l'app si elle n'existe pas (le validator gère l'unique:name)
-        $app = Application::create([
+        // Utilisation de notre nouvelle action atomique via le container
+        $result = app(\App\Actions\Deployment\CreateAtomicStack::class)->execute([
             'user_id' => $user->id,
             'server_id' => $request->server_id,
             'name' => $request->name,
             'repo_url' => $request->repo_url,
             'branch' => $request->branch ?? 'main',
             'domain' => $request->domain,
-            'status' => 'pending',
-            'is_deploying' => false,
+            'preset' => $request->preset ?? 'generic',
         ]);
-
-        // Création du déploiement initial
-        $deployment = Deployment::create([
-            'application_id' => $app->id,
-            'status' => 'pending',
-        ]);
-
-        // Déclenchement du job de déploiement
-        DeployApplicationJob::dispatch($deployment->id);
 
         return response()->json([
-            'message' => 'Application créée avec succès. Déploiement en cours...',
-            'application' => $app->load('server'),
-            'deployment_id' => $deployment->id
+            'message' => 'Stack atomique créée avec succès. Déploiement en cours...',
+            'application' => $result['application']->load('server'),
+            'deployment_id' => $result['deployment']->id
         ], 201);
-
     }
 
     public function show($id)

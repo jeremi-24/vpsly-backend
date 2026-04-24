@@ -48,7 +48,6 @@ class BlueprintService
         if ($isPhp) {
             // Logique Laravel/PHP
             $envVars['NIXPACKS_PHP_ROOT_DIR'] = '/app/public';
-            $envVars['NIXPACKS_PHP_FALLBACK_PATH'] = '/index.php';
             
             // Génération automatique de APP_KEY si absente
             if (!$app->environmentVariables()->where('key', 'APP_KEY')->exists()) {
@@ -130,9 +129,9 @@ class BlueprintService
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $domain = "{$appSlug}.{$serverIp}.sslip.io";
 
-        // Limites de ressources
-        $memoryLimit = "512MB";
+        // Limites de ressources (Ajustées pour petit VPS)
         $cpuLimit = "0.5";
+        $memoryReservation = $isPhp ? '128m' : '64m';
 
         $services = [
             $appSlug => [
@@ -157,8 +156,10 @@ class BlueprintService
                 'deploy' => [
                     'resources' => [
                         'limits' => [
-                            'memory' => $memoryLimit,
                             'cpus' => $cpuLimit
+                        ],
+                        'reservations' => [
+                            'memory' => $memoryReservation
                         ]
                     ]
                 ]
@@ -177,6 +178,11 @@ class BlueprintService
                 'image' => $database->image ?: ($dbType === 'mysql' ? 'mysql:8' : 'postgres:15'),
                 'restart' => 'always',
                 'networks' => ['vpsly'],
+                'command' => $dbType === 'mysql' ? [
+                    '--performance_schema=OFF',
+                    '--innodb_buffer_pool_size=64M',
+                    '--innodb_log_buffer_size=1M',
+                ] : null,
                 'environment' => [
                     ($dbType === 'mysql' ? 'MYSQL_DATABASE' : 'POSTGRES_DB') => $database->postgres_db,
                     ($dbType === 'mysql' ? 'MYSQL_USER' : 'POSTGRES_USER') => $database->postgres_user,
@@ -190,9 +196,10 @@ class BlueprintService
                     'test' => $dbType === 'mysql' 
                         ? ["CMD", "mysqladmin", "ping", "-h", "localhost"]
                         : ["CMD-SHELL", "pg_isready -U {$database->postgres_user} -d {$database->postgres_db}"],
-                    'interval' => '5s',
+                    'interval' => '10s', // Augmenté pour laisser respirer le CPU
                     'timeout' => '5s',
-                    'retries' => 5
+                    'retries' => 10, // Plus de tentatives pour les VPS lents
+                    'start_period' => '30s'
                 ]
             ];
 

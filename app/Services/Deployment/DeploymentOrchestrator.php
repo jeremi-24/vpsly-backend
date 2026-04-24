@@ -133,12 +133,30 @@ class DeploymentOrchestrator
 
                 // AUTO-MIGRATION (Logique intelligente par stack)
                 if ($this->blueprint->isPhp($nixpacksPlan)) {
-                    $this->streamer->log($deployment, "📦 Detected Laravel/PHP stack. Running migrations...", LogType::INFO);
-                    sleep(2);
+                    $this->streamer->log($deployment, "📦 Detected Laravel/PHP stack. Waiting for container...", LogType::INFO);
+                    
+                    // Attendre que le container soit vraiment running (Fix OOM/Race condition)
+                    $maxWait = 15;
+                    $waited = 0;
+                    $status = 'starting';
+
+                    while ($waited < $maxWait) {
+                        $status = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$appSlug} 2>/dev/null || echo 'missing'"));
+                        if ($status === 'running') break;
+                        
+                        sleep(2);
+                        $waited += 2;
+                    }
+
+                    if ($status !== 'running') {
+                        throw new \App\Exceptions\Deployment\NonRetryableException("Le container {$appSlug} n'a pas démarré à temps (Status: {$status}).");
+                    }
+
+                    $this->streamer->log($deployment, "Container is running. Starting migrations...", LogType::INFO);
                     $this->ssh->stream("docker exec {$appSlug} php artisan migrate --force", function ($line) use ($deployment) {
                         $this->streamer->log($deployment, $line, LogType::DEBUG);
                     });
-                } elseif (str_contains(json_encode($nixpacksPlan), 'prisma')) {
+                } elseif ($this->planContains($nixpacksPlan, 'prisma')) {
                     $this->streamer->log($deployment, "📦 Detected Prisma. Running migrations...", LogType::INFO);
                     $this->ssh->stream("docker exec {$appSlug} npx prisma migrate deploy", function ($line) use ($deployment) {
                         $this->streamer->log($deployment, $line, LogType::DEBUG);
@@ -168,7 +186,7 @@ class DeploymentOrchestrator
             // CLEANUP
             $this->cleanup($deployment);
 
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             $msg = "❌ DEPLOYMENT FAILED: " . $e->getMessage();
             $this->streamer->log($deployment, $msg, LogType::ERROR);
             $this->updateStatus($app, $deployment, DeploymentStatus::FAILED);

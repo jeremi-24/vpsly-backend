@@ -15,7 +15,7 @@ class CreateAtomicStack
     /**
      * Crée une stack complète (App + DB + ENV) en une seule fois.
      */
-    public function execute(array $data): Application
+    public function execute(array $data): array
     {
         $server = Server::findOrFail($data['server_id']);
         $preset = $data['preset'] ?? 'generic';
@@ -27,9 +27,10 @@ class CreateAtomicStack
             'repo_url' => $data['repo_url'],
             'branch' => $data['branch'] ?? 'main',
             'server_id' => $server->id,
-            'user_id' => auth()->id(),
+            'user_id' => $data['user_id'],
             'status' => 'preparing',
             'build_pack' => 'nixpacks',
+            'is_deploying' => true,
         ]);
 
         // 2. Injection des variables du Preset
@@ -63,6 +64,18 @@ class CreateAtomicStack
             $this->presets->linkDatabase($app, $db, $preset);
         }
 
-        return $app;
+        // 4. Création du déploiement initial
+        $deployment = \App\Models\Deployment::create([
+            'application_id' => $app->id,
+            'status' => 'pending',
+        ]);
+
+        // 5. Déclenchement du job de déploiement
+        \App\Jobs\DeployApplicationJob::dispatch($deployment->id);
+
+        return [
+            'application' => $app,
+            'deployment' => $deployment
+        ];
     }
 }

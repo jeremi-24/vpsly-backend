@@ -16,6 +16,11 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
 
+    // Route d'authentification Broadcast personnalisée (pour contourner les problèmes de middleware par défaut)
+    Route::post('/broadcasting/auth', function (Request $request) {
+        return Broadcast::auth($request);
+    });
+
     Route::post('/logout', function (Request $request) {
         $request->user()->currentAccessToken()->delete();
         return response()->json(['message' => 'Logged out']);

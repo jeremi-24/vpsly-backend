@@ -88,17 +88,21 @@ class NixpacksService
     /**
      * Build une image Docker à partir du code source en utilisant Nixpacks.
      */
-    public function build(Server $server, Deployment $deployment, string $appPath, string $imageName, ?string $nodeVersion = null): void
+    public function build(Server $server, Deployment $deployment, string $appPath, string $imageName, ?string $nodeVersion = null, array $extraEnv = []): void
     {
         $this->logStreamer->log($deployment, " Lancement du build universel (Nixpacks)...", \App\Enums\LogType::INFO);
 
-        $env = "";
+        $envString = "";
         if ($nodeVersion) {
-            $env = " --env NIXPACKS_NODE_VERSION={$nodeVersion}";
+            $envString .= " --env NIXPACKS_NODE_VERSION={$nodeVersion}";
+        }
+
+        foreach ($extraEnv as $key => $value) {
+            $envString .= " --env {$key}=\"{$value}\"";
         }
 
         // On s'assure que nixpacks est bien dans le PATH pour cette session
-        $command = "cd \"{$appPath}\" && export PATH=\$PATH:/usr/local/bin && nixpacks build . --name \"{$imageName}\" --inline-cache{$env}";
+        $command = "cd \"{$appPath}\" && export PATH=\$PATH:/usr/local/bin && nixpacks build . --name \"{$imageName}\" --inline-cache{$envString}";
 
         Log::info("[Nixpacks] Running build: {$command}");
 

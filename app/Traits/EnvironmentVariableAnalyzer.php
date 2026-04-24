@@ -43,4 +43,16 @@ trait EnvironmentVariableAnalyzer
         }
         return null;
     }
+
+    public static function analyzeBuildVariables(array $variables): array
+    {
+        $warnings = [];
+        foreach ($variables as $key => $value) {
+            $warning = self::analyzeBuildVariable($key, (string)$value);
+            if ($warning) {
+                $warnings[] = $warning;
+            }
+        }
+        return $warnings;
+    }
 }

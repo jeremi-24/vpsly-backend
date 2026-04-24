@@ -65,7 +65,7 @@ class DeploymentController extends Controller
 
     public function logs($id)
     {
-        $deployment = Deployment::with('logs')->findOrFail($id);
+        $deployment = Deployment::findOrFail($id);
 
         return response()->json([
             'deployment_id' => $deployment->id,
