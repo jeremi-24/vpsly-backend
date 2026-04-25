@@ -93,6 +93,21 @@ class SSHService
         }
     }
 
+    public function download(string $remotePath): string
+    {
+        if (!$this->ssh) {
+            throw new Exception("SSH not connected.");
+        }
+
+        $output = $this->ssh->exec("cat " . escapeshellarg($remotePath));
+        
+        if ($this->ssh->getExitStatus() !== 0) {
+            throw new Exception("Download failed: cat command returned status " . $this->ssh->getExitStatus());
+        }
+
+        return $output;
+    }
+
     public function disconnect(): void
     {
         if ($this->ssh) {

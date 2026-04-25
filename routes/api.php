@@ -73,6 +73,14 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/{id}', [\App\Http\Controllers\Api\ApplicationCronController::class, 'destroy']);
             Route::post('/sync', [\App\Http\Controllers\Api\ApplicationCronController::class, 'sync']);
         });
+
+        // Backups
+        Route::prefix('{application}/backups')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'index']);
+            Route::post('/', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'store']);
+            Route::get('/{id}/download', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'download']);
+            Route::delete('/{id}', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'destroy']);
+        });
     });
 
 
