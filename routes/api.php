@@ -42,6 +42,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [ApplicationController::class, 'index']);
         Route::post('/', [ApplicationController::class, 'store']);
         Route::get('/{id}', [ApplicationController::class, 'show']);
+        Route::delete('/{id}', [ApplicationController::class, 'destroy']);
 
         // Variables d'Environnement
         Route::prefix('{application}/env-vars')->group(function () {
@@ -119,3 +120,5 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 Route::get('/github/auth/callback', [\App\Http\Controllers\Api\GitHubApiController::class, 'callback']);
+
+Route::post('/webhooks/github', [\App\Http\Controllers\Api\GitHubWebhookController::class, 'handle']);

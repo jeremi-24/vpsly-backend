@@ -67,5 +67,30 @@ class ApplicationController extends Controller
 
         return response()->json($app);
     }
+
+    public function destroy($id, \App\Services\GitHubService $github)
+    {
+        $user = auth()->user() ?? \App\Models\User::first();
+        $app = Application::where('user_id', $user->id)->findOrFail($id);
+
+        // Nettoyage Webhook GitHub
+        if ($app->github_hook_id && $user->github_token) {
+            try {
+                $urlPath = parse_url($app->repo_url, PHP_URL_PATH);
+                $parts = explode('/', trim($urlPath, '/'));
+                if (count($parts) >= 2) {
+                    $owner = $parts[0];
+                    $repo = str_replace('.git', '', $parts[1]);
+                    $github->deleteWebhook($user, $owner, $repo, (int)$app->github_hook_id);
+                }
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning("Échec suppression webhook : " . $e->getMessage());
+            }
+        }
+
+        $app->delete();
+
+        return response()->json(['message' => 'Application supprimée avec succès']);
+    }
 }
 

@@ -123,4 +123,6 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'webhook_secret' => env('WEBHOOK_SECRET', 'vpsly_secret_key'),
+
 ];

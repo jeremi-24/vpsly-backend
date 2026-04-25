@@ -8,7 +8,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Application extends Model
 {
-    protected $guarded = [];
+    protected $fillable = [
+        'user_id',
+        'server_id',
+        'name',
+        'repo_url',
+        'branch',
+        'github_hook_id',
+    ];
 
     protected function casts(): array
     {

@@ -5,12 +5,15 @@ namespace App\Actions\Deployment;
 use App\Models\Application;
 use App\Models\StandalonePostgresql;
 use App\Models\Server;
-use App\Services\Deployment\PresetService;
+use App\Services\GitHubService;
 use Illuminate\Support\Str;
 
 class CreateAtomicStack
 {
-    public function __construct(protected PresetService $presets) {}
+    public function __construct(
+        protected PresetService $presets,
+        protected GitHubService $github
+    ) {}
 
     /**
      * Crée une stack complète (App + DB + ENV) en une seule fois.
@@ -32,6 +35,31 @@ class CreateAtomicStack
             'build_pack' => "nixpacks:{$preset}",
             'is_deploying' => true,
         ]);
+
+        // 1.5. Tentative de création du Webhook GitHub (Zéro Config)
+        try {
+            $user = \App\Models\User::find($data['user_id']);
+            if ($user && $user->github_token) {
+                // Extraction owner/repo de l'URL (ex: https://github.com/owner/repo)
+                $urlPath = parse_url($data['repo_url'], PHP_URL_PATH);
+                $parts = explode('/', trim($urlPath, '/'));
+                
+                if (count($parts) >= 2) {
+                    $owner = $parts[0];
+                    $repo = $parts[1];
+                    $repo = str_replace('.git', '', $repo);
+
+                    $callbackUrl = config('app.url') . '/api/webhooks/github';
+                    
+                    $hookId = $this->github->createWebhook($user, $owner, $repo, $callbackUrl);
+                    
+                    $app->update(['github_hook_id' => $hookId]);
+                }
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning("Impossible de créer le webhook GitHub : " . $e->getMessage());
+            // On ne bloque pas la création de l'app si le webhook échoue
+        }
 
         // 2. Injection des variables du Preset
         foreach ($presetConfig['env'] as $key => $value) {

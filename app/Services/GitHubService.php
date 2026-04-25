@@ -105,4 +105,52 @@ class GitHubService
             'name' => $data['name'],
         ];
     }
+
+    /**
+     * Enregistre un webhook pour un dépôt.
+     */
+    public function createWebhook(User $user, string $owner, string $repo, string $callbackUrl): int
+    {
+        if (!$user->github_token) {
+            throw new Exception("Compte GitHub non connecté.");
+        }
+
+        $response = Http::withToken($user->github_token)
+            ->withHeaders(['User-Agent' => 'VPSLY-Engine'])
+            ->post("{$this->baseUrl}/repos/{$owner}/{$repo}/hooks", [
+                'name' => 'web',
+                'active' => true,
+                'events' => ['push'],
+                'config' => [
+                    'url' => $callbackUrl,
+                    'content_type' => 'json',
+                    'insecure_ssl' => '0',
+                    'secret' => config('app.webhook_secret', 'vpsly_secret_key'),
+                ],
+            ]);
+
+        if (!$response->successful()) {
+            throw new Exception("Erreur création Webhook GitHub : " . $response->body());
+        }
+
+        return $response->json('id');
+    }
+
+    /**
+     * Supprime un webhook.
+     */
+    public function deleteWebhook(User $user, string $owner, string $repo, int $hookId): void
+    {
+        if (!$user->github_token) {
+            return;
+        }
+
+        $response = Http::withToken($user->github_token)
+            ->withHeaders(['User-Agent' => 'VPSLY-Engine'])
+            ->delete("{$this->baseUrl}/repos/{$owner}/{$repo}/hooks/{$hookId}");
+
+        if (!$response->successful() && $response->status() !== 404) {
+            throw new Exception("Erreur suppression Webhook GitHub : " . $response->body());
+        }
+    }
 }
