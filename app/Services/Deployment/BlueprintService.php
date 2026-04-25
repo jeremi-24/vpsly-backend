@@ -234,6 +234,13 @@ class BlueprintService
             $compose['volumes']["{$database->uuid}_data"] = ['driver' => 'local'];
         }
 
+        // Déclaration des volumes nommés de l'application
+        foreach ($volumes as $vol) {
+            if (!$vol->host_path) {
+                $compose['volumes'][$vol->name] = ['driver' => 'local'];
+            }
+        }
+
         return \Symfony\Component\Yaml\Yaml::dump($compose, 10);
     }
 

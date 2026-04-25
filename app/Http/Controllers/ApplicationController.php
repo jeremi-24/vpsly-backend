@@ -60,6 +60,7 @@ class ApplicationController extends Controller
                 'deployments' => fn($q) => $q->latest()->limit(5),
                 'environmentVariables',
                 'databases',
+                'persistentVolumes',
             ])
             ->where('user_id', $user->id)
             ->findOrFail($id);

@@ -96,6 +96,72 @@ class BackupService
     }
 
     /**
+     * Crée une sauvegarde d'un volume persistant d'une application.
+     */
+    public function createVolumeBackup(Application $app, \App\Models\LocalPersistentVolume $volume): Backup
+    {
+        $this->ssh->connect($app->server);
+
+        $backupId = Str::random(8);
+        $safeAppName = preg_replace('/[^a-z0-9\-_]/i', '_', $app->name);
+        $safeVolName = preg_replace('/[^a-z0-9\-_]/i', '_', $volume->name ?? 'vol');
+        $filename = "backup_vol_{$safeAppName}_{$safeVolName}_" . now()->format('Y-m-d_His') . "_{$backupId}.tar.gz";
+        $backupDir = "/var/www/vpsly/backups/{$app->id}";
+        $backupPath = "{$backupDir}/{$filename}";
+
+        $this->ssh->exec("mkdir -p {$backupDir}");
+
+        $backup = Backup::create([
+            'application_id' => $app->id,
+            'name' => $filename,
+            'type' => 'volume',
+            'status' => 'pending',
+            'path' => $backupPath,
+            'notes' => "Volume: {$volume->mount_path}",
+        ]);
+
+        try {
+            $hostPath = $volume->host_path;
+            
+            // Si c'est un volume nommé (pas de host_path), on utilise le chemin Docker par défaut avec le préfixe du projet
+            if (!$hostPath) {
+                $appSlug = preg_replace('/[^a-z0-9\-]/', '-', strtolower($app->name));
+                $hostPath = "/var/lib/docker/volumes/{$appSlug}_{$volume->name}/_data";
+            }
+
+            // Vérifie si le dossier existe avant
+            $checkDir = $this->ssh->exec("if [ -d \"{$hostPath}\" ]; then echo \"exists\"; fi");
+            if (trim($checkDir) !== 'exists') {
+                throw new \Exception("Le dossier source {$hostPath} n'existe pas sur le serveur. Assurez-vous que l'application a été déployée au moins une fois avec ce volume.");
+            }
+
+            $tarCmd = "tar -czf {$backupPath} -C {$hostPath} .";
+            $this->ssh->exec($tarCmd);
+
+            // Calculer la taille
+            $sizeOutput = $this->ssh->exec("stat -c%s {$backupPath}");
+            $size = (int) trim($sizeOutput);
+
+            $backup->update([
+                'status' => 'success',
+                'size' => $size,
+            ]);
+
+            return $backup;
+
+        } catch (\Exception $e) {
+            Log::error("Volume backup failed for app {$app->name}: " . $e->getMessage());
+            $backup->update([
+                'status' => 'failed',
+                'notes' => $e->getMessage()
+            ]);
+            throw $e;
+        } finally {
+            $this->ssh->disconnect();
+        }
+    }
+
+    /**
      * Liste les backups d'une application.
      */
     public function getBackups(Application $app)

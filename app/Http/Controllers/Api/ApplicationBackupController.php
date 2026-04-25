@@ -25,9 +25,10 @@ class ApplicationBackupController extends Controller
         $application = Application::findOrFail($appId);
         $request->validate([
             'database_id' => 'nullable|exists:standalone_postgresqls,id',
+            'volume_id' => 'nullable|exists:local_persistent_volumes,id',
         ]);
 
-        CreateBackupJob::dispatch($application->id, $request->database_id);
+        CreateBackupJob::dispatch($application->id, $request->database_id, $request->volume_id);
 
         return response()->json([
             'message' => 'Sauvegarde lancée en arrière-plan.'
