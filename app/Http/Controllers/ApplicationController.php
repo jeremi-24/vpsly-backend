@@ -61,7 +61,7 @@ class ApplicationController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Stack atomique créée avec succès. Déploiement en cours...',
+            'message' => 'Configuration terminée. Lancement du déploiement...',
             'application' => $result['application']->load('server'),
             'deployment_id' => $result['deployment']->id
         ], 201);
