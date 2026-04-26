@@ -59,7 +59,7 @@ class StandalonePostgresql extends BaseModel
                 : '/var/lib/postgresql/data';
 
             LocalPersistentVolume::create([
-                'name' => 'postgres-data-' . $database->uuid,
+                'name' => 'db-data-' . $database->uuid,
                 'mount_path' => $mountPath,
                 'resource_id' => $database->id,
                 'resource_type' => $database->getMorphClass(),
