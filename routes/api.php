@@ -8,6 +8,7 @@ use App\Http\Controllers\DeploymentController;
 use App\Http\Controllers\Api\EnvironmentVariableController;
 use App\Http\Controllers\Api\ApplicationLogController;
 use App\Http\Controllers\Api\DatabaseController;
+use Illuminate\Support\Facades\Broadcast;
 
 // Si vous utilisez Sanctum avec Auth : Route::middleware('auth:sanctum')->get('/user', function () { ... });
 
@@ -25,6 +26,8 @@ Route::middleware('auth:sanctum')->group(function () {
         $request->user()->currentAccessToken()->delete();
         return response()->json(['message' => 'Logged out']);
     });
+
+    Route::get('/dashboard', [\App\Http\Controllers\Api\DashboardController::class, 'index']);
 
     // Gestion des Serveurs
     Route::prefix('servers')->group(function () {
@@ -120,6 +123,11 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/stream', [\App\Http\Controllers\Api\DatabaseLogController::class, 'stream']);
         });
     });
+
+    // Monitoring
+    Route::get('/servers/{server}/metrics', [\App\Http\Controllers\Api\MonitoringController::class, 'serverStats']);
+    Route::get('/{type}/{id}/metrics', [\App\Http\Controllers\Api\MonitoringController::class, 'containerStats'])
+        ->where('type', 'applications|databases');
 });
 
 Route::get('/github/auth/callback', [\App\Http\Controllers\Api\GitHubApiController::class, 'callback']);

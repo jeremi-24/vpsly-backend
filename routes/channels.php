@@ -17,5 +17,14 @@ Broadcast::channel('deployment.{id}', function ($user, $id) {
 
 Broadcast::channel('application.{id}', function ($user, $id) {
     $application = \App\Models\Application::find($id);
-    return $application && $application->user_id === $user->id;
+    return $application && $application->server->user_id === $user->id;
+});
+
+Broadcast::channel('user.{id}', function ($user, $id) {
+    return (int) $user->id === (int) $id;
+});
+
+Broadcast::channel('server.{id}', function ($user, $id) {
+    $server = \App\Models\Server::find($id);
+    return $server && $server->user_id === $user->id;
 });

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Server;
 use Exception;
 use phpseclib3\Net\SSH2;
+use phpseclib3\Net\SFTP;
 use phpseclib3\Crypt\PublicKeyLoader;
 
 class SshService
@@ -28,7 +29,7 @@ class SshService
         $this->ssh->setTimeout(0);
     }
 
-    public function exec(string $command): string
+    public function exec(string $command, bool $throwOnError = true): string
     {
         if (!$this->ssh) {
             throw new Exception("SSH not connected. Call connect() first.");
@@ -37,7 +38,7 @@ class SshService
         // On redirige stderr vers stdout pour toujours récupérer les erreurs système bas niveau proprement 
         $output = $this->ssh->exec($command . ' 2>&1');
         
-        if ($this->ssh->getExitStatus() !== 0) {
+        if ($throwOnError && $this->ssh->getExitStatus() !== 0) {
            throw new Exception("Command failed: {$command}\nOutput: {$output}");
         }
 
@@ -76,6 +77,20 @@ class SshService
         // Tolérance d'erreur si l'exit status est non-zéro
         if ($this->ssh->getExitStatus() !== 0) {
             throw new Exception("Command stream failed with exit status " . $this->ssh->getExitStatus() . ": {$command}");
+        }
+    }
+
+    public function upload(Server $server, string $localPath, string $remotePath): void
+    {
+        $sftp = new SFTP($server->ip, $server->ssh_port);
+        $key = PublicKeyLoader::load($server->ssh_private_key);
+
+        if (!$sftp->login($server->ssh_user, $key)) {
+            throw new Exception("SFTP connection failed for server {$server->name}");
+        }
+
+        if (!$sftp->put($remotePath, $localPath, SFTP::SOURCE_LOCAL_FILE)) {
+            throw new Exception("Failed to upload file to {$remotePath}");
         }
     }
 }
