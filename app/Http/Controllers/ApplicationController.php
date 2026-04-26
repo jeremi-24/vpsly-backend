@@ -34,6 +34,21 @@ class ApplicationController extends Controller
 
         $user = auth()->user() ?? User::first();
 
+        // Empêcher les doublons (même repo et même branche)
+        $existing = Application::where('repo_url', $request->repo_url)
+            ->where('branch', $request->branch ?? 'main')
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'message' => 'Une application utilisant ce dépôt et cette branche existe déjà.',
+                'errors' => [
+                    'repo_url' => ['Ce dépôt et cette branche sont déjà utilisés par l\'application : ' . $existing->name]
+                ]
+            ], 422);
+        }
+
         // Utilisation de notre nouvelle action atomique via le container
         $result = app(\App\Actions\Deployment\CreateAtomicStack::class)->execute([
             'user_id' => $user->id,
@@ -73,7 +88,10 @@ class ApplicationController extends Controller
         $user = auth()->user() ?? \App\Models\User::first();
         $app = Application::where('user_id', $user->id)->findOrFail($id);
 
-        // Nettoyage Webhook GitHub
+        // 1. Dispatch du nettoyage serveur (Avant de supprimer le modèle !)
+        \App\Jobs\DeleteApplicationJob::dispatch((int)$app->server_id, (string)$app->slug);
+
+        // 2. Nettoyage Webhook GitHub
         if ($app->github_hook_id && $user->github_token) {
             try {
                 $urlPath = parse_url($app->repo_url, PHP_URL_PATH);
@@ -90,7 +108,7 @@ class ApplicationController extends Controller
 
         $app->delete();
 
-        return response()->json(['message' => 'Application supprimée avec succès']);
+        return response()->json(['message' => 'Application supprimée avec succès. Le nettoyage du serveur est en cours en arrière-plan.']);
     }
 }
 

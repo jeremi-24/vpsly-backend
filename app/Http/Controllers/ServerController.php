@@ -141,6 +141,26 @@ class ServerController extends Controller
     }
 
     /**
+     * Nettoie le serveur (docker system prune).
+     */
+    public function prune(Server $server, \App\Services\Deployment\DockerService $docker)
+    {
+        $this->authorizeOwner($server);
+
+        try {
+            $output = $docker->prune($server);
+            return response()->json([
+                'message' => 'Nettoyage du serveur effectué avec succès.',
+                'output' => $output
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Échec du nettoyage : ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Vérifie que l'utilisateur est bien le propriétaire.
      */
     protected function authorizeOwner(Server $server)

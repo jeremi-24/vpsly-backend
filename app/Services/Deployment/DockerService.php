@@ -67,4 +67,31 @@ class DockerService
             }
         }
     }
+
+    /**
+     * Nettoie les images, containers et volumes orphelins sur le VPS.
+     */
+    public function prune(Server $server): string
+    {
+        return $this->ssh->connect($server)->exec("docker system prune -af --volumes");
+    }
+
+    /**
+     * Arrête et supprime une stack Docker Compose et ses fichiers associés.
+     */
+    public function stopAndRemove(Server $server, string $appSlug): void
+    {
+        $appPath = "/var/www/vpsly/apps/{$appSlug}";
+        
+        $this->ssh->connect($server);
+
+        // On tente d'arrêter la stack si elle existe (test du dossier d'abord)
+        $this->ssh->exec("[ -d {$appPath} ] && cd {$appPath} && docker compose down -v || true");
+
+        // Sécurité : On force la suppression du container par son nom au cas où docker-compose aurait échoué
+        $this->ssh->exec("docker rm -f {$appSlug} || true");
+
+        // On supprime le dossier de l'application
+        $this->ssh->exec("rm -rf {$appPath}");
+    }
 }

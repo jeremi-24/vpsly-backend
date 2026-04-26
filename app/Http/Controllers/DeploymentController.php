@@ -45,6 +45,14 @@ class DeploymentController extends Controller
             'status' => 'pending',
         ]);
 
+        // Broadcast immédiat pour le frontend (loader)
+        event(new \App\Events\DeploymentStatusUpdatedEvent(
+            $deployment->id,
+            $app->id,
+            'pending',
+            true
+        ));
+
         // 2. Dispatch asynchrone du coeur (le front ne pendouille pas)
         DeployApplicationJob::dispatch($deployment->id);
 

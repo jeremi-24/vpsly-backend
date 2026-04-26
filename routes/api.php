@@ -34,6 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{server}', [ServerController::class, 'update']);
         Route::delete('/{server}', [ServerController::class, 'destroy']);
         Route::post('/{server}/test-connection', [ServerController::class, 'testConnection']);
+        Route::post('/{server}/prune', [ServerController::class, 'prune']);
     });
 
     // Gestion des Applications

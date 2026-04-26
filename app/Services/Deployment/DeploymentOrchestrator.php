@@ -80,7 +80,7 @@ class DeploymentOrchestrator
             $this->streamer->log($deployment, "Synchronizing code from {$app->repo_url}...", LogType::INFO);
 
             $this->git->sync($app->repo_url, $app->branch, $appPath, $app->user->github_token);
-            
+
             // VERSIONING : On récupère le commit (Copy of Coolify)
             $commitInfo = $this->git->getLatestCommit($appPath);
             $deployment->update([
@@ -135,7 +135,7 @@ class DeploymentOrchestrator
                 // AUTO-MIGRATION (Logique intelligente par stack)
                 if ($this->blueprint->isPhp($nixpacksPlan)) {
                     $this->streamer->log($deployment, "📦 Detected Laravel/PHP stack. Waiting for container...", LogType::INFO);
-                    
+
                     // Attendre que le container soit vraiment running (Fix OOM/Race condition)
                     $maxWait = 15;
                     $waited = 0;
@@ -143,8 +143,9 @@ class DeploymentOrchestrator
 
                     while ($waited < $maxWait) {
                         $status = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$appSlug} 2>/dev/null || echo 'missing'"));
-                        if ($status === 'running') break;
-                        
+                        if ($status === 'running')
+                            break;
+
                         sleep(2);
                         $waited += 2;
                     }
@@ -181,9 +182,9 @@ class DeploymentOrchestrator
 
             // STEP 6: SYNC CRONS (Automated Sync)
             try {
-                $this->streamer->log($deployment, "⏰ Synchronizing scheduled tasks...", LogType::INFO);
+                $this->streamer->log($deployment, " Synchronizing scheduled tasks...", LogType::INFO);
                 $this->cron->sync($app);
-                $this->streamer->log($deployment, "✅ Scheduled tasks synchronized.", LogType::INFO);
+                $this->streamer->log($deployment, " Scheduled tasks synchronized.", LogType::INFO);
             } catch (Exception $e) {
                 $this->streamer->log($deployment, "⚠️ Cron sync failed: " . $e->getMessage(), LogType::WARNING);
             }
@@ -191,7 +192,7 @@ class DeploymentOrchestrator
             // FINAL STEP: SUCCESS
             $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
             $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
-            $this->streamer->log($deployment, "🚀 Deployment successful!", LogType::SUCCESS);
+            $this->streamer->log($deployment, " Deployment successful!", LogType::SUCCESS);
 
             // CLEANUP
             $this->cleanup($deployment);
@@ -199,19 +200,19 @@ class DeploymentOrchestrator
         } catch (\Throwable $e) {
             $msg = "❌ DEPLOYMENT FAILED: " . $e->getMessage();
             $this->streamer->log($deployment, $msg, LogType::ERROR);
-            
+
             try {
                 $this->updateStatus($app, $deployment, DeploymentStatus::FAILED);
             } catch (\Throwable $dbError) {
                 // Si la DB est lockée, on ne peut rien faire de plus ici
             }
-            
+
             throw $e;
         } finally {
             // SÉCURITÉ ULTIME : On s'assure que le loader s'arrête quoi qu'il arrive
             try {
                 $app->update(['is_deploying' => false]);
-                
+
                 // On notifie le front via l'event si ce n'est pas déjà fait
                 event(new \App\Events\DeploymentStatusUpdatedEvent(
                     $deployment->id,
@@ -222,7 +223,7 @@ class DeploymentOrchestrator
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::error("Failsafe unlock failed: " . $e->getMessage());
             }
-            
+
             $this->streamer->flush($deployment);
             $this->ssh->disconnect();
         }
@@ -251,20 +252,20 @@ class DeploymentOrchestrator
             $status = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$appSlug} 2>/dev/null || echo 'missing'"));
 
             if ($health === 'healthy') {
-                $this->streamer->log($deployment, "✅ Container is healthy (Docker Healthcheck Passed)", LogType::SUCCESS);
+                $this->streamer->log($deployment, " Container is healthy (Docker Healthcheck Passed)", LogType::SUCCESS);
                 $success = true;
                 break;
             }
 
             if ($status !== 'running') {
                 $this->streamer->log($deployment, "❌ Container crashed or not running (Status: {$status})", LogType::ERROR);
-                break; 
+                break;
             }
 
             // 2. Fallback Health Check (HTTP)
             $publicCheck = trim($this->ssh->exec("curl -k -s -o /dev/null -w '%{http_code}' https://{$domain} --max-time 2 2>/dev/null || echo '000'"));
             if (in_array($publicCheck, ['200', '301', '302', '304', '401', '405'])) {
-                $this->streamer->log($deployment, "✅ App is responsive (HTTP {$publicCheck})", LogType::SUCCESS);
+                $this->streamer->log($deployment, " App is responsive (HTTP {$publicCheck})", LogType::SUCCESS);
                 $success = true;
                 break;
             }
@@ -315,7 +316,7 @@ class DeploymentOrchestrator
             !$isFinished
         ));
     }
-    
+
     /**
      * Résout la version de Node.js.
      */
@@ -324,7 +325,8 @@ class DeploymentOrchestrator
         $fallbackVersion = "22";
         try {
             $json = $this->ssh->exec("cat \"{$appPath}/package.json\" 2>/dev/null || echo 'not'");
-            if (trim($json) === 'not') return $fallbackVersion;
+            if (trim($json) === 'not')
+                return $fallbackVersion;
 
             $data = json_decode($json, true);
             $enginesNode = data_get($data, 'engines.node');

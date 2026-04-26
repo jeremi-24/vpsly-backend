@@ -13,7 +13,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
-class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue, \Illuminate\Contracts\Queue\ShouldBeUnique
+class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -31,15 +31,6 @@ class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue, \
     }
 
     /**
-     * Identifiant unique pour éviter les déploiements concurrents d'une même app.
-     */
-    public function uniqueId(): string
-    {
-        $deployment = \App\Models\Deployment::find($this->deploymentId);
-        return (string) ($deployment->application_id ?? $this->deploymentId);
-    }
-
-    /**
      * Timeout pour le job en secondes, car un docker build peut être long.
      */
     public $timeout = 600; 
@@ -50,7 +41,7 @@ class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue, \
 
     public function handle(\App\Services\Deployment\DeploymentOrchestrator $orchestrator): void
     {
-        $deployment = Deployment::with(['application.user', 'application.server'])->findOrFail($this->deploymentId);
+        $deployment = \App\Models\Deployment::with(['application.user', 'application.server'])->findOrFail($this->deploymentId);
         
         // Anti-skip : on ne traite que les status 'pending' au démarrage (sécurité supplémentaire)
         if ($deployment->status !== \App\Enums\DeploymentStatus::PENDING->value && $this->attempts() === 1) {
@@ -66,5 +57,37 @@ class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue, \
              // En cas d'erreur temporaire (SSH timeout, réseau), Laravel retentera (tries = 3).
             throw $e;
         }
+    }
+
+    /**
+     * Nettoyage de secours si le job échoue définitivement.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        $deployment = \App\Models\Deployment::find($this->deploymentId);
+        if (!$deployment) return;
+
+        $app = $deployment->application;
+        if (!$app) return;
+
+        // Reset de l'état de l'application
+        $app->update([
+            'is_deploying' => false,
+            'status' => \App\Enums\DeploymentStatus::FAILED->value,
+        ]);
+
+        // Mise à jour du déploiement
+        $deployment->update([
+            'status' => \App\Enums\DeploymentStatus::FAILED->value,
+            'finished_at' => now(),
+        ]);
+
+        // Notification frontend
+        event(new \App\Events\DeploymentStatusUpdatedEvent(
+            $deployment->id,
+            $app->id,
+            \App\Enums\DeploymentStatus::FAILED->value,
+            false
+        ));
     }
 }
