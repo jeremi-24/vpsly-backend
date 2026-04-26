@@ -17,7 +17,8 @@ class DeploymentStatusUpdatedEvent implements ShouldBroadcastNow
         public int $deploymentId,
         public int $applicationId,
         public string $status,
-        public bool $isDeploying
+        public bool $isDeploying,
+        public ?string $lastDeployedAt = null
     ) {}
 
     public function broadcastOn(): array

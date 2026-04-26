@@ -218,7 +218,8 @@ class DeploymentOrchestrator
                     $deployment->id,
                     $app->id,
                     $app->status,
-                    false
+                    false,
+                    $app->last_deployed_at?->toIso8601String()
                 ));
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::error("Failsafe unlock failed: " . $e->getMessage());
@@ -313,7 +314,8 @@ class DeploymentOrchestrator
             $deployment->id,
             $app->id,
             $status->value,
-            !$isFinished
+            !$isFinished,
+            $app->last_deployed_at?->toIso8601String()
         ));
     }
 

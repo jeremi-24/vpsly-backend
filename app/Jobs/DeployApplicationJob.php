@@ -87,7 +87,8 @@ class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue
             $deployment->id,
             $app->id,
             \App\Enums\DeploymentStatus::FAILED->value,
-            false
+            false,
+            $app->last_deployed_at?->toIso8601String()
         ));
     }
 }
