@@ -58,6 +58,7 @@ class DashboardController extends Controller
             ->map(function($d) {
                 return [
                     'id' => $d->id,
+                    'application_id' => $d->application_id,
                     'app_name' => $d->application->name,
                     'branch' => $d->application->branch,
                     'status' => $d->status,
@@ -86,6 +87,20 @@ class DashboardController extends Controller
                 ];
             });
 
+        // Top 3 Serveurs avec stats détaillées
+        $topServers = $servers->take(3)->map(function($server) {
+            $stats = $this->monitoring->getServerStats($server);
+            return [
+                'id' => $server->id,
+                'name' => $server->name,
+                'ip' => $server->ip,
+                'status' => $server->status,
+                'cpu_usage' => $stats['cpu_usage'] ?? 0,
+                'mem_percent' => $stats['mem_percent'] ?? 0,
+                'disk_percent' => $stats['disk_percent'] ?? 0,
+            ];
+        });
+
         return response()->json([
             'stats' => [
                 'applications' => $appsCount,
@@ -95,6 +110,7 @@ class DashboardController extends Controller
                 'avg_mem' => $serversWithStats > 0 ? round($totalMem / $serversWithStats, 1) : 0,
             ],
             'servers_count' => $servers->count(),
+            'top_servers' => $topServers,
             'recent_deployments' => $recentDeployments,
             'overview_data' => $overviewData,
         ]);

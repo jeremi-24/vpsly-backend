@@ -16,6 +16,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
+    Route::put('/user', [\App\Http\Controllers\Api\UserController::class, 'update']);
 
     // Route d'authentification Broadcast personnalisée (pour contourner les problèmes de middleware par défaut)
     Route::post('/broadcasting/auth', function (Request $request) {
