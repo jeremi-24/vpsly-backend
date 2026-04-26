@@ -139,6 +139,25 @@ class DatabaseController extends Controller
     }
 
     /**
+     * Supprime l'instance de base de données.
+     */
+    public function destroy(StandalonePostgresql $database)
+    {
+        // 1. Dispatch du job de nettoyage (Avant suppression du modèle)
+        \App\Jobs\DeleteDatabaseJob::dispatch(
+            (int) $database->server_id, 
+            (string) $database->uuid
+        );
+
+        // 2. Suppression de l'entrée en DB
+        $database->delete();
+
+        return response()->json([
+            'message' => 'L\'instance de base de données a été supprimée. Le nettoyage du serveur est en cours.'
+        ]);
+    }
+
+    /**
      * Dissocie la base de données de son application.
      */
     public function unlink(StandalonePostgresql $database)
