@@ -21,15 +21,17 @@ class CreateBackupJob implements ShouldQueue
     protected $applicationId;
     protected $databaseId;
     protected $volumeId;
+    protected $backupId;
 
     /**
      * Create a new job instance.
      */
-    public function __construct(int $applicationId, ?int $databaseId = null, ?int $volumeId = null)
+    public function __construct(int $applicationId, ?int $databaseId = null, ?int $volumeId = null, ?int $backupId = null)
     {
         $this->applicationId = $applicationId;
         $this->databaseId = $databaseId;
         $this->volumeId = $volumeId;
+        $this->backupId = $backupId;
     }
 
     /**
@@ -41,10 +43,10 @@ class CreateBackupJob implements ShouldQueue
         
         if ($this->databaseId) {
             $db = StandalonePostgresql::findOrFail($this->databaseId);
-            $backupService->createDatabaseBackup($app, $db);
+            $backupService->createDatabaseBackup($app, $db, $this->backupId);
         } elseif ($this->volumeId) {
             $volume = \App\Models\LocalPersistentVolume::findOrFail($this->volumeId);
-            $backupService->createVolumeBackup($app, $volume);
+            $backupService->createVolumeBackup($app, $volume, $this->backupId);
         } else {
             // Logique pour backup global si besoin
         }

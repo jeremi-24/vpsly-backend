@@ -15,3 +15,7 @@ Broadcast::channel('deployment.{id}', function ($user, $id) {
     return $isOwner;
 });
 
+Broadcast::channel('application.{id}', function ($user, $id) {
+    $application = \App\Models\Application::find($id);
+    return $application && $application->user_id === $user->id;
+});

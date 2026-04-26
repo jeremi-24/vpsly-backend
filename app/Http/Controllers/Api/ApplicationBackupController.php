@@ -28,11 +28,19 @@ class ApplicationBackupController extends Controller
             'volume_id' => 'nullable|exists:local_persistent_volumes,id',
         ]);
 
-        CreateBackupJob::dispatch($application->id, $request->database_id, $request->volume_id);
-
-        return response()->json([
-            'message' => 'Sauvegarde lancée en arrière-plan.'
+        // Pré-création de l'enregistrement pour feedback instantané
+        $backup = \App\Models\Backup::create([
+            'application_id' => $application->id,
+            'database_id' => $request->database_id,
+            'name' => 'Initialisation...',
+            'type' => $request->database_id ? 'db' : 'volume',
+            'status' => 'pending',
+            'path' => '',
         ]);
+
+        CreateBackupJob::dispatch($application->id, $request->database_id, $request->volume_id, $backup->id);
+
+        return response()->json($backup);
     }
 
     public function destroy($appId, $backupId)

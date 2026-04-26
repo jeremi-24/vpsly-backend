@@ -21,28 +21,37 @@ class BackupService
     /**
      * Crée une sauvegarde d'une base de données liée à une application.
      */
-    public function createDatabaseBackup(Application $app, StandalonePostgresql $db): Backup
+    public function createDatabaseBackup(Application $app, StandalonePostgresql $db, ?int $backupId = null): Backup
     {
         $this->ssh->connect($app->server);
 
-        $backupId = Str::random(8);
+        $backupId_str = Str::random(8);
         $safeAppName = preg_replace('/[^a-z0-9\-_]/i', '_', $app->name);
         $safeDbName = preg_replace('/[^a-z0-9\-_]/i', '_', $db->name);
-        $filename = "backup_{$safeAppName}_{$safeDbName}_" . now()->format('Y-m-d_His') . "_{$backupId}.sql";
+        $filename = "backup_{$safeAppName}_{$safeDbName}_" . now()->format('Y-m-d_His') . "_{$backupId_str}.sql";
         $backupDir = "/var/www/vpsly/backups/{$app->id}";
         $backupPath = "{$backupDir}/{$filename}";
 
         // Créer le dossier de backup s'il n'existe pas
         $this->ssh->exec("mkdir -p {$backupDir}");
 
-        $backup = Backup::create([
-            'application_id' => $app->id,
-            'database_id' => $db->id,
-            'name' => $filename,
-            'type' => 'db',
-            'status' => 'pending',
-            'path' => $backupPath,
-        ]);
+        if ($backupId) {
+            $backup = Backup::findOrFail($backupId);
+            $backup->update([
+                'name' => $filename,
+                'path' => $backupPath,
+                'status' => 'pending'
+            ]);
+        } else {
+            $backup = Backup::create([
+                'application_id' => $app->id,
+                'database_id' => $db->id,
+                'name' => $filename,
+                'type' => 'db',
+                'status' => 'pending',
+                'path' => $backupPath,
+            ]);
+        }
 
         try {
             $isMysql = str_contains(strtolower($db->image), 'mysql') || str_contains(strtolower($db->image), 'mariadb');
@@ -81,14 +90,23 @@ class BackupService
                 'name' => $finalName,
             ]);
 
+            $backup->refresh();
+            Log::info("L'événement de mise à jour de sauvegarde a été diffusé (Succès) pour l'ID de sauvegarde : {$backup->id}");
+            event(new \App\Events\BackupUpdatedEvent($backup));
+
             return $backup;
 
         } catch (\Exception $e) {
-            Log::error("Backup failed for app {$app->name}: " . $e->getMessage());
+            Log::error("Sauvegarde de {$app->name} a échoué : " . $e->getMessage());
             $backup->update([
                 'status' => 'failed',
                 'notes' => $e->getMessage()
             ]);
+
+            $backup->refresh();
+            Log::info("L'événement de mise à jour de sauvegarde a été diffusé (Échec) pour l'ID de sauvegarde : {$backup->id}");
+            event(new \App\Events\BackupUpdatedEvent($backup));
+            
             throw $e;
         } finally {
             $this->ssh->disconnect();
@@ -98,27 +116,37 @@ class BackupService
     /**
      * Crée une sauvegarde d'un volume persistant d'une application.
      */
-    public function createVolumeBackup(Application $app, \App\Models\LocalPersistentVolume $volume): Backup
+    public function createVolumeBackup(Application $app, \App\Models\LocalPersistentVolume $volume, ?int $backupId = null): Backup
     {
         $this->ssh->connect($app->server);
 
-        $backupId = Str::random(8);
+        $backupId_str = Str::random(8);
         $safeAppName = preg_replace('/[^a-z0-9\-_]/i', '_', $app->name);
         $safeVolName = preg_replace('/[^a-z0-9\-_]/i', '_', $volume->name ?? 'vol');
-        $filename = "backup_vol_{$safeAppName}_{$safeVolName}_" . now()->format('Y-m-d_His') . "_{$backupId}.tar.gz";
+        $filename = "backup_vol_{$safeAppName}_{$safeVolName}_" . now()->format('Y-m-d_His') . "_{$backupId_str}.tar.gz";
         $backupDir = "/var/www/vpsly/backups/{$app->id}";
         $backupPath = "{$backupDir}/{$filename}";
 
         $this->ssh->exec("mkdir -p {$backupDir}");
 
-        $backup = Backup::create([
-            'application_id' => $app->id,
-            'name' => $filename,
-            'type' => 'volume',
-            'status' => 'pending',
-            'path' => $backupPath,
-            'notes' => "Volume: {$volume->mount_path}",
-        ]);
+        if ($backupId) {
+            $backup = Backup::findOrFail($backupId);
+            $backup->update([
+                'name' => $filename,
+                'path' => $backupPath,
+                'status' => 'pending',
+                'notes' => "Volume: {$volume->mount_path}",
+            ]);
+        } else {
+            $backup = Backup::create([
+                'application_id' => $app->id,
+                'name' => $filename,
+                'type' => 'volume',
+                'status' => 'pending',
+                'path' => $backupPath,
+                'notes' => "Volume: {$volume->mount_path}",
+            ]);
+        }
 
         try {
             $hostPath = $volume->host_path;
@@ -147,6 +175,10 @@ class BackupService
                 'size' => $size,
             ]);
 
+            $backup->refresh();
+            Log::info("Broadcasting BackupUpdatedEvent (Success - Volume) for Backup ID: {$backup->id}");
+            event(new \App\Events\BackupUpdatedEvent($backup));
+
             return $backup;
 
         } catch (\Exception $e) {
@@ -155,6 +187,11 @@ class BackupService
                 'status' => 'failed',
                 'notes' => $e->getMessage()
             ]);
+
+            $backup->refresh();
+            Log::info("Broadcasting BackupUpdatedEvent (Failed - Volume) for Backup ID: {$backup->id}");
+            event(new \App\Events\BackupUpdatedEvent($backup));
+
             throw $e;
         } finally {
             $this->ssh->disconnect();
