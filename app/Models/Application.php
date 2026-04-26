@@ -14,7 +14,14 @@ class Application extends Model
         'name',
         'repo_url',
         'branch',
+        'domain',
+        'status',
+        'is_deploying',
+        'last_deployed_at',
+        'build_pack',
         'github_hook_id',
+        'has_laravel_scheduler',
+        'last_cron_synced_at',
     ];
 
     protected function casts(): array
