@@ -239,7 +239,7 @@ class DeploymentOrchestrator
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $domain = "{$appSlug}.{$serverIp}.sslip.io";
 
-        $this->streamer->log($deployment, "🔍 Verifying application health (Target: https://{$domain})", LogType::INFO);
+        $this->streamer->log($deployment, " Verifying application health (Target: https://{$domain})", LogType::INFO);
 
         $maxAttempts = 30; // Coolify attend souvent assez longtemps pour les gros builds
         $attempt = 0;
@@ -271,7 +271,7 @@ class DeploymentOrchestrator
                 break;
             }
 
-            $this->streamer->log($deployment, "⏳ Waiting for app to become healthy... ({$attempt}/{$maxAttempts})", LogType::DEBUG);
+            $this->streamer->log($deployment, " Waiting for app to become healthy... ({$attempt}/{$maxAttempts})", LogType::DEBUG);
             sleep(2);
         }
 
@@ -348,7 +348,7 @@ class DeploymentOrchestrator
      */
     protected function ensureTraefik(Server $server, Deployment $deployment): void
     {
-        $this->streamer->log($deployment, "🔍 Infrastructure: Ensuring Traefik v3...", LogType::DEBUG);
+        $this->streamer->log($deployment, " Infrastructure: Ensuring Traefik v3...", LogType::DEBUG);
 
         $this->ssh->exec("docker network create vpsly 2>/dev/null || true");
 

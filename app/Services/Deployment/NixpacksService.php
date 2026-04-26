@@ -19,7 +19,7 @@ class NixpacksService
      */
     public function ensureInstalled(Server $server, Deployment $deployment): void
     {
-        $this->logStreamer->log($deployment, "🔍 Vérification de Nixpacks sur le serveur...");
+        $this->logStreamer->log($deployment, " Vérification de Nixpacks sur le serveur...");
 
         $check = $this->ssh->exec("command -v nixpacks || echo 'not found'");
 
@@ -45,7 +45,7 @@ class NixpacksService
      */
     public function getPlan(Server $server, Deployment $deployment, string $appPath, ?string $nodeVersion = null): array
     {
-        $this->logStreamer->log($deployment, "🔍 Analyse de la structure du projet via Nixpacks...", \App\Enums\LogType::INFO);
+        $this->logStreamer->log($deployment, " Analyse de la structure du projet via Nixpacks...", \App\Enums\LogType::INFO);
 
         $env = "";
         if ($nodeVersion) {
@@ -111,7 +111,8 @@ class NixpacksService
             $this->ssh->stream($command, function ($line) use ($deployment, &$lastLines) {
                 $this->logStreamer->log($deployment, $line, \App\Enums\LogType::DEBUG);
                 $lastLines[] = $line;
-                if (count($lastLines) > 20) array_shift($lastLines);
+                if (count($lastLines) > 20)
+                    array_shift($lastLines);
             });
 
             $this->logStreamer->log($deployment, "📦 Image Docker buildée avec succès : {$imageName}", \App\Enums\LogType::SUCCESS);

@@ -20,7 +20,7 @@ class DockerService
      */
     public function ensureInstalled(Server $server, Deployment $deployment): void
     {
-        $this->logStreamer->log($deployment, "🔍 Vérification de Docker sur le serveur...");
+        $this->logStreamer->log($deployment, " Vérification de Docker sur le serveur...");
 
         $check = $this->ssh->exec("command -v docker || echo 'not found'");
 
@@ -82,7 +82,7 @@ class DockerService
     public function stopAndRemove(Server $server, string $appSlug): void
     {
         $appPath = "/var/www/vpsly/apps/{$appSlug}";
-        
+
         $this->ssh->connect($server);
 
         // On tente d'arrêter la stack si elle existe (test du dossier d'abord)
