@@ -36,9 +36,14 @@ class DeploymentOrchestrator
         $this->streamer->log($deployment, " Deployment process started for {$app->name}...", LogType::INFO);
         $this->streamer->flush($deployment); // Force immediate feedback
 
-        // Verrouillage de l'application
-        Log::info("[Deploy] Locking application...");
+        // Verrouillage de l'application et init déploiement
+        Log::info("[Deploy] Locking application and initializing metadata...");
         $app->update(['is_deploying' => true]);
+        
+        $deployment->update([
+            'started_at' => now(),
+            'branch' => $app->branch ?? 'main',
+        ]);
 
         try {
             // STEP 1: PREPARING

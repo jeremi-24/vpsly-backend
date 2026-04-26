@@ -10,6 +10,7 @@ class Deployment extends Model
 {
     protected $fillable = [
         'application_id',
+        'branch',
         'deployment_uuid',
         'status',
         'logs',

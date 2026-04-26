@@ -110,5 +110,15 @@ class ApplicationController extends Controller
 
         return response()->json(['message' => 'Application supprimée avec succès. Le nettoyage du serveur est en cours en arrière-plan.']);
     }
+
+    public function deployments($id)
+    {
+        $user = auth()->user() ?? \App\Models\User::first();
+        $app = Application::where('user_id', $user->id)->findOrFail($id);
+        
+        return response()->json(
+            $app->deployments()->latest()->paginate(20)
+        );
+    }
 }
 
