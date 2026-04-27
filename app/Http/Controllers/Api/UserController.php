@@ -14,10 +14,12 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'phone' => 'nullable|string|max:20',
         ]);
 
         $user->update([
             'name' => $validated['name'],
+            'phone' => $validated['phone'] ?? null,
         ]);
 
         return response()->json($user);
