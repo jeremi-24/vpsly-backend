@@ -18,7 +18,6 @@ class BackupSettingController extends Controller
             [
                 'frequency' => 'daily',
                 'execution_time' => '02:00',
-                'retention_days' => 7,
                 'storage_destination' => 'local',
                 'notification_channel' => 'email',
                 'active' => true,
@@ -36,7 +35,6 @@ class BackupSettingController extends Controller
         $request->validate([
             'frequency' => 'required|string|in:hourly,daily,weekly,manual',
             'execution_time' => 'required|string',
-            'retention_days' => 'required|integer|min:1|max:365',
             'storage_destination' => 'required|string|in:local,google_drive,s3',
             'notification_channel' => 'required|string|in:email,whatsapp,both,none',
             'notification_phone' => 'nullable|string',

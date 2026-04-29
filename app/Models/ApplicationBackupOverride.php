@@ -11,7 +11,6 @@ class ApplicationBackupOverride extends Model
         'application_id',
         'is_enabled',
         'frequency_override',
-        'retention_override',
         'excluded_paths',
     ];
 

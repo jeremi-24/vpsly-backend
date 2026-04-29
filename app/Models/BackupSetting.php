@@ -11,7 +11,6 @@ class BackupSetting extends Model
         'user_id',
         'frequency',
         'execution_time',
-        'retention_days',
         'storage_destination',
         'storage_credentials',
         'notification_channel',
