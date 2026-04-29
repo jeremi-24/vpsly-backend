@@ -33,4 +33,12 @@ class User extends Authenticatable
             'github_refresh_token' => 'encrypted',
         ];
     }
+
+    /**
+     * Get the backup settings for the user.
+     */
+    public function backupSettings(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(BackupSetting::class);
+    }
 }

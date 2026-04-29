@@ -125,8 +125,10 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 
-    // Backups Globaux
+    // Backups Globaux & Paramètres
     Route::get('/backups', [\App\Http\Controllers\Api\BackupController::class, 'index']);
+    Route::get('/settings/backups', [\App\Http\Controllers\Api\BackupSettingController::class, 'show']);
+    Route::post('/settings/backups', [\App\Http\Controllers\Api\BackupSettingController::class, 'store']);
 
     // Monitoring
     Route::get('/servers/{server}/metrics', [\App\Http\Controllers\Api\MonitoringController::class, 'serverStats']);

@@ -68,4 +68,9 @@ class Application extends Model
     {
         return $this->morphMany(LocalPersistentVolume::class, 'resource');
     }
+
+    public function backups(): HasMany
+    {
+        return $this->hasMany(Backup::class);
+    }
 }
