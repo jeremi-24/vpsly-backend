@@ -223,8 +223,8 @@ class BackupService
             try {
                 Log::info("Démarrage de l'exportation Google Drive pour le backup {$backup->id}");
                 
-                // 1. Créer le service avec les credentials déchiffrés
-                $driveService = new \App\Services\Backup\GoogleDriveService($settings->storage_credentials);
+                // 1. Créer le service avec l'objet settings pour permettre le rafraîchissement
+                $driveService = new \App\Services\Backup\GoogleDriveService($settings);
 
                 // 2. Télécharger le fichier du VPS vers le backend temporairement
                 $tempPath = storage_path("app/temp/" . $backup->name);

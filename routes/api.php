@@ -134,8 +134,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/servers/{server}/metrics', [\App\Http\Controllers\Api\MonitoringController::class, 'serverStats']);
     Route::get('/{type}/{id}/metrics', [\App\Http\Controllers\Api\MonitoringController::class, 'containerStats'])
         ->where('type', 'applications|databases');
+
+    // Google Drive Integration
+    Route::get('/auth/google/drive/redirect', [\App\Http\Controllers\Api\GoogleDriveController::class, 'redirect']);
+    Route::post('/settings/backups/google-drive/disconnect', [\App\Http\Controllers\Api\GoogleDriveController::class, 'disconnect']);
 });
 
+Route::get('/auth/google/drive/callback', [\App\Http\Controllers\Api\GoogleDriveController::class, 'callback']);
 Route::get('/github/auth/callback', [\App\Http\Controllers\Api\GitHubApiController::class, 'callback']);
 
 Route::post('/webhooks/github', [\App\Http\Controllers\Api\GitHubWebhookController::class, 'handle']);
