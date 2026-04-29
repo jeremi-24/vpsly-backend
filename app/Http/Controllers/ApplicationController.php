@@ -14,7 +14,7 @@ class ApplicationController extends Controller
     {
         $user = auth()->user() ?? User::first();
         return response()->json(
-            Application::with('server')
+            Application::with(['server', 'databases', 'persistentVolumes'])
                 ->where('user_id', $user->id)
                 ->latest()
                 ->get()

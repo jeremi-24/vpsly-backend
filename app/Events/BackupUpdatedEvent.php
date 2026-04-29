@@ -25,6 +25,7 @@ class BackupUpdatedEvent implements ShouldBroadcast
     {
         return [
             new PrivateChannel('application.' . $this->backup->application_id),
+            new PrivateChannel('user.' . $this->backup->application->user_id),
         ];
     }
 
