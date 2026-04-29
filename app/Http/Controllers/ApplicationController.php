@@ -12,7 +12,7 @@ class ApplicationController extends Controller
 {
     public function index()
     {
-        $user = auth()->user() ?? User::first();
+        $user = auth()->user();
         return response()->json(
             Application::with(['server', 'databases', 'persistentVolumes'])
                 ->where('user_id', $user->id)
@@ -31,8 +31,7 @@ class ApplicationController extends Controller
             'domain' => 'nullable|string',
             'preset' => 'nullable|string', // Ajout du preset
         ]);
-
-        $user = auth()->user() ?? User::first();
+        $user = auth()->user();
 
         // Empêcher les doublons (même repo et même branche)
         $existing = Application::where('repo_url', $request->repo_url)
@@ -69,7 +68,7 @@ class ApplicationController extends Controller
 
     public function show($id)
     {
-        $user = auth()->user() ?? \App\Models\User::first();
+        $user = auth()->user();
         $app = Application::with([
                 'server',
                 'deployments' => fn($q) => $q->latest()->limit(5),
@@ -85,7 +84,7 @@ class ApplicationController extends Controller
 
     public function destroy($id, \App\Services\GitHubService $github)
     {
-        $user = auth()->user() ?? \App\Models\User::first();
+        $user = auth()->user();
         $app = Application::where('user_id', $user->id)->findOrFail($id);
 
         // 1. Dispatch du nettoyage serveur (Avant de supprimer le modèle !)
@@ -113,7 +112,7 @@ class ApplicationController extends Controller
 
     public function deployments($id)
     {
-        $user = auth()->user() ?? \App\Models\User::first();
+        $user = auth()->user();
         $app = Application::where('user_id', $user->id)->findOrFail($id);
         
         return response()->json(

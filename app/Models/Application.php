@@ -73,4 +73,19 @@ class Application extends Model
     {
         return $this->hasMany(Backup::class);
     }
+
+    /**
+     * Surcharge la résolution de la route pour forcer le filtrage par utilisateur connecté.
+     * Protège toutes les routes utilisant l'Implicit Binding (Volumes, Crons, EnvVars, etc.)
+     */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        if (auth()->check()) {
+            return $this->where('user_id', auth()->id())
+                ->where($field ?? $this->getRouteKeyName(), $value)
+                ->firstOrFail();
+        }
+
+        return parent::resolveRouteBinding($value, $field);
+    }
 }

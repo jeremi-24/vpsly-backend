@@ -14,7 +14,13 @@ class DatabaseController extends Controller
 {
     public function index(Request $request)
     {
-        return StandalonePostgresql::with('server')->latest()->get()->each->append(['internal_db_url', 'external_db_url']);
+        return StandalonePostgresql::with('server')
+            ->whereHas('server', function ($query) {
+                $query->where('user_id', auth()->id());
+            })
+            ->latest()
+            ->get()
+            ->each->append(['internal_db_url', 'external_db_url']);
     }
 
     public function store(Request $request)
@@ -28,10 +34,13 @@ class DatabaseController extends Controller
             'postgres_db' => 'nullable|string',
         ]);
 
+        // Vérifier que le serveur appartient bien à l'utilisateur
+        $server = Server::where('user_id', auth()->id())->findOrFail($validated['server_id']);
+
         $database = StandalonePostgresql::create([
             'uuid' => (string) Str::uuid(),
             'name' => $validated['name'],
-            'server_id' => $validated['server_id'],
+            'server_id' => $server->id,
             'image' => $validated['image'] ?? 'postgres:15-alpine',
             'postgres_user' => $validated['postgres_user'] ?? 'postgres',
             'postgres_password' => $validated['postgres_password'] ?? Str::random(16),
@@ -44,6 +53,8 @@ class DatabaseController extends Controller
 
     public function show(StandalonePostgresql $database)
     {
+        $this->authorizeOwner($database);
+
         return $database->load(['server', 'persistentStorages'])
             ->append(['internal_db_url', 'external_db_url']);
     }
@@ -54,6 +65,7 @@ class DatabaseController extends Controller
     public function deploy($id)
     {
         $database = StandalonePostgresql::findOrFail($id);
+        $this->authorizeOwner($database);
         
         // Mise à jour de l'état avant le dispatch
         $database->update(['status' => 'deploying']);
@@ -71,6 +83,8 @@ class DatabaseController extends Controller
      */
     public function togglePublic(StandalonePostgresql $database)
     {
+        $this->authorizeOwner($database);
+
         $database->is_public = !$database->is_public;
         
         if ($database->is_public && !$database->public_port) {
@@ -90,6 +104,7 @@ class DatabaseController extends Controller
     public function verifyIntegrity($id, \App\Services\Deployment\SSHService $ssh)
     {
         $database = StandalonePostgresql::findOrFail($id);
+        $this->authorizeOwner($database);
         $volumeName = "db-data-{$database->uuid}";
         
         try {
@@ -114,6 +129,8 @@ class DatabaseController extends Controller
     }
     public function link(Request $request, StandalonePostgresql $database)
     {
+        $this->authorizeOwner($database);
+
         $validated = $request->validate([
             'application_id' => 'required|exists:applications,id'
         ]);
@@ -143,6 +160,8 @@ class DatabaseController extends Controller
      */
     public function destroy(StandalonePostgresql $database)
     {
+        $this->authorizeOwner($database);
+
         // 1. Dispatch du job de nettoyage (Avant suppression du modèle)
         \App\Jobs\DeleteDatabaseJob::dispatch(
             (int) $database->server_id, 
@@ -162,6 +181,8 @@ class DatabaseController extends Controller
      */
     public function unlink(StandalonePostgresql $database)
     {
+        $this->authorizeOwner($database);
+
         $oldAppId = $database->application_id;
 
         $database->update([
@@ -182,5 +203,15 @@ class DatabaseController extends Controller
             'message' => 'Lien rompu. Mise à jour de l\'application en cours...',
             'database' => $database
         ]);
+    }
+
+    /**
+     * Vérifie que l'utilisateur est bien le propriétaire du serveur qui héberge la base.
+     */
+    protected function authorizeOwner(StandalonePostgresql $database)
+    {
+        if ($database->server->user_id !== auth()->id()) {
+            abort(403, 'Accès non autorisé à cette base de données.');
+        }
     }
 }

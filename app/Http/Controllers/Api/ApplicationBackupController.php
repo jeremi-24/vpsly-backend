@@ -12,7 +12,7 @@ class ApplicationBackupController extends Controller
 {
     public function index($appId)
     {
-        $application = Application::findOrFail($appId);
+        $application = Application::where('user_id', auth()->id())->findOrFail($appId);
         return response()->json(
             Backup::where('application_id', $application->id)
                 ->latest()
@@ -22,7 +22,7 @@ class ApplicationBackupController extends Controller
 
     public function store(Request $request, $appId)
     {
-        $application = Application::findOrFail($appId);
+        $application = Application::where('user_id', auth()->id())->findOrFail($appId);
         $request->validate([
             'database_id' => 'nullable|exists:standalone_postgresqls,id',
             'volume_id' => 'nullable|exists:local_persistent_volumes,id',
@@ -45,8 +45,8 @@ class ApplicationBackupController extends Controller
 
     public function destroy($appId, $backupId)
     {
-        $backup = Backup::where('application_id', $appId)->findOrFail($backupId);
-        $application = Application::with('server')->findOrFail($appId);
+        $application = Application::with('server')->where('user_id', auth()->id())->findOrFail($appId);
+        $backup = Backup::where('application_id', $application->id)->findOrFail($backupId);
 
         // 1. Suppression sur le VPS (si présent)
         if ($backup->path) {
@@ -86,8 +86,8 @@ class ApplicationBackupController extends Controller
 
     public function restore($appId, $backupId)
     {
-        $application = Application::findOrFail($appId);
-        $backup = Backup::where('application_id', $appId)->findOrFail($backupId);
+        $application = Application::where('user_id', auth()->id())->findOrFail($appId);
+        $backup = Backup::where('application_id', $application->id)->findOrFail($backupId);
 
         // On ne peut pas restaurer si une restauration est déjà en cours
         if ($backup->status === 'restoring') {
@@ -104,8 +104,8 @@ class ApplicationBackupController extends Controller
 
     public function download($appId, $backupId)
     {
-        $backup = Backup::where('application_id', $appId)->findOrFail($backupId);
-        $application = Application::with('server', 'user')->findOrFail($appId);
+        $application = Application::with('server', 'user')->where('user_id', auth()->id())->findOrFail($appId);
+        $backup = Backup::where('application_id', $application->id)->findOrFail($backupId);
 
         if ($backup->status !== 'success') {
             abort(404, "Backup non disponible ou en échec.");
