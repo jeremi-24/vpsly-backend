@@ -46,32 +46,96 @@ class ApplicationBackupController extends Controller
     public function destroy($appId, $backupId)
     {
         $backup = Backup::where('application_id', $appId)->findOrFail($backupId);
-        // TODO: Supprimer le fichier sur le VPS via SSH
+        $application = Application::with('server')->findOrFail($appId);
+
+        // 1. Suppression sur le VPS (si présent)
+        if ($backup->path) {
+            try {
+                $ssh = app(\App\Services\Deployment\SSHService::class);
+                $ssh->connect($application->server);
+                $ssh->exec("rm {$backup->path}");
+                $ssh->disconnect();
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning("Impossible de supprimer le fichier local backup {$backup->id} : " . $e->getMessage());
+            }
+        }
+
+        // 2. Suppression sur Google Drive (si présent)
+        $notes = $backup->notes ?? '';
+        if (str_contains($notes, 'Google Drive ID:')) {
+            preg_match('/Google Drive ID: ([a-zA-Z0-9_-]+)/', $notes, $matches);
+            $driveId = $matches[1] ?? null;
+
+            if ($driveId) {
+                try {
+                    $user = $application->user;
+                    $settings = $user->backupSettings()->first();
+                    if ($settings) {
+                        $driveService = new \App\Services\Backup\GoogleDriveService($settings);
+                        $driveService->deleteFile($driveId);
+                    }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::warning("Impossible de supprimer le fichier Drive pour backup {$backup->id} : " . $e->getMessage());
+                }
+            }
+        }
+
         $backup->delete();
-        return response()->json(['message' => 'Entrée de sauvegarde supprimée.']);
+        return response()->json(['message' => 'Sauvegarde supprimée.']);
     }
 
     public function download($appId, $backupId)
     {
         $backup = Backup::where('application_id', $appId)->findOrFail($backupId);
-        $application = Application::with('server')->findOrFail($appId);
+        $application = Application::with('server', 'user')->findOrFail($appId);
 
-        if ($backup->status !== 'success' || !$backup->path) {
+        if ($backup->status !== 'success') {
             abort(404, "Backup non disponible ou en échec.");
         }
 
-        $ssh = app(\App\Services\Deployment\SSHService::class);
-        $ssh->connect($application->server);
+        // Cas 1 : Le fichier est sur le VPS
+        if ($backup->path) {
+            $ssh = app(\App\Services\Deployment\SSHService::class);
+            $ssh->connect($application->server);
 
-        try {
-            $content = $ssh->download($backup->path);
-
-            return response($content)
-                ->header('Content-Type', 'application/gzip')
-                ->header('Content-Disposition', 'attachment; filename="' . $backup->name . '"');
-
-        } finally {
-            $ssh->disconnect();
+            try {
+                $content = $ssh->download($backup->path);
+                return $this->downloadResponse($content, $backup->name);
+            } finally {
+                $ssh->disconnect();
+            }
         }
+
+        // Cas 2 : Le fichier est uniquement sur Google Drive
+        $notes = $backup->notes ?? '';
+        if (str_contains($notes, 'Google Drive ID:')) {
+            preg_match('/Google Drive ID: ([a-zA-Z0-9_-]+)/', $notes, $matches);
+            $driveId = $matches[1] ?? null;
+
+            if ($driveId) {
+                $user = $application->user;
+                $settings = $user->backupSettings()->first();
+                
+                if ($settings) {
+                    try {
+                        $driveService = new \App\Services\Backup\GoogleDriveService($settings);
+                        $content = $driveService->getFileContent($driveId);
+                        return $this->downloadResponse($content, $backup->name);
+                    } catch (\Exception $e) {
+                        Log::error("Erreur téléchargement Drive pour backup {$backup->id} : " . $e->getMessage());
+                        abort(500, "Erreur lors du téléchargement depuis Google Drive.");
+                    }
+                }
+            }
+        }
+
+        abort(404, "Fichier de sauvegarde introuvable (local ou cloud).");
+    }
+
+    protected function downloadResponse($content, $filename)
+    {
+        return response($content)
+            ->header('Content-Type', 'application/gzip')
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     }
 }

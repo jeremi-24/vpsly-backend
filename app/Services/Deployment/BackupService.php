@@ -25,10 +25,9 @@ class BackupService
     {
         $this->ssh->connect($app->server);
 
-        $backupId_str = Str::random(8);
-        $safeAppName = preg_replace('/[^a-z0-9\-_]/i', '_', $app->name);
+        $backupId_str = Str::random(4);
         $safeDbName = preg_replace('/[^a-z0-9\-_]/i', '_', $db->name);
-        $filename = "backup_{$safeAppName}_{$safeDbName}_" . now()->format('Y-m-d_His') . "_{$backupId_str}.sql";
+        $filename = "db_{$safeDbName}_" . now()->format('d-m-Y_His') . "_{$backupId_str}.sql";
         $backupDir = "/var/www/vpsly/backups/{$app->id}";
         $backupPath = "{$backupDir}/{$filename}";
 
@@ -124,10 +123,9 @@ class BackupService
     {
         $this->ssh->connect($app->server);
 
-        $backupId_str = Str::random(8);
-        $safeAppName = preg_replace('/[^a-z0-9\-_]/i', '_', $app->name);
+        $backupId_str = Str::random(4);
         $safeVolName = preg_replace('/[^a-z0-9\-_]/i', '_', $volume->name ?? 'vol');
-        $filename = "backup_vol_{$safeAppName}_{$safeVolName}_" . now()->format('Y-m-d_His') . "_{$backupId_str}.tar.gz";
+        $filename = "vol_{$safeVolName}_" . now()->format('d-m-Y_His') . "_{$backupId_str}.tar.gz";
         $backupDir = "/var/www/vpsly/backups/{$app->id}";
         $backupPath = "{$backupDir}/{$filename}";
 
@@ -235,18 +233,25 @@ class BackupService
                 $content = $this->ssh->download($backup->path);
                 file_put_contents($tempPath, $content);
 
-                // 3. Upload vers Drive
-                $driveId = $driveService->uploadFile($tempPath, $backup->name);
+                // 3. Upload vers Drive (dans vpsly_backups/{appName}/)
+                $driveId = $driveService->uploadFile($tempPath, $backup->name, $app->name);
 
-                // 4. Mettre à jour le backup avec l'ID Drive (optionnel mais utile)
+                // 4. Mettre à jour le backup avec l'ID Drive et vider le path local
+                $oldPath = $backup->path;
                 $backup->update([
-                    'notes' => ($backup->notes ? $backup->notes . "\n" : "") . "Google Drive ID: {$driveId}"
+                    'notes' => ($backup->notes ? $backup->notes . "\n" : "") . "Google Drive ID: {$driveId}",
+                    'path' => null, // On indique que le fichier n'est plus sur le VPS
                 ]);
 
-                // 5. Nettoyer le fichier temporaire local (sur le backend VPSly)
+                // 5. Supprimer le fichier sur le serveur distant (VPS)
+                if ($oldPath) {
+                    $this->ssh->exec("rm {$oldPath}");
+                }
+
+                // 6. Nettoyer le fichier temporaire local (sur le backend VPSly)
                 unlink($tempPath);
 
-                Log::info("Exportation Google Drive réussie pour le backup {$backup->id} (Drive ID: {$driveId})");
+                Log::info("Exportation Google Drive réussie et fichier local supprimé pour le backup {$backup->id}");
 
             } catch (\Exception $e) {
                 Log::error("Échec de l'exportation Google Drive : " . $e->getMessage());
