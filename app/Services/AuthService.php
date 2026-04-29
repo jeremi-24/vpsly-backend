@@ -26,6 +26,17 @@ class AuthService
             ]
         );
 
+        // Si l'utilisateur vient d'être créé, on envoie le mail de bienvenue
+        if ($user->wasRecentlyCreated) {
+            $user->notify(new \App\Notifications\WelcomeNotification($user));
+        }
+
+        // Alerte de sécurité pour la connexion
+        $user->notify(new \App\Notifications\LoginSecurityNotification([
+            'ip' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+        ]));
+
         // Connexion optionnelle côté backend pour certaines fonctionnalités Socialite si nécessaire
         Auth::login($user);
 

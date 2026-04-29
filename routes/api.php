@@ -10,6 +10,10 @@ use App\Http\Controllers\Api\ApplicationLogController;
 use App\Http\Controllers\Api\DatabaseController;
 use Illuminate\Support\Facades\Broadcast;
 
+// Authentification Classique
+Route::post('/register', [\App\Http\Controllers\Api\AuthController::class, 'register']);
+Route::post('/login', [\App\Http\Controllers\Api\AuthController::class, 'login']);
+
 // Si vous utilisez Sanctum avec Auth : Route::middleware('auth:sanctum')->get('/user', function () { ... });
 
 Route::middleware('auth:sanctum')->group(function () {
@@ -139,6 +143,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // Google Drive Integration
     Route::get('/auth/google/drive/redirect', [\App\Http\Controllers\Api\GoogleDriveController::class, 'redirect']);
     Route::post('/settings/backups/google-drive/disconnect', [\App\Http\Controllers\Api\GoogleDriveController::class, 'disconnect']);
+
+    // Notifications
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\NotificationController::class, 'index']);
+        Route::get('/unread-count', [\App\Http\Controllers\Api\NotificationController::class, 'unreadCount']);
+        Route::post('/mark-all-as-read', [\App\Http\Controllers\Api\NotificationController::class, 'markAllAsRead']);
+        Route::post('/{id}/mark-as-read', [\App\Http\Controllers\Api\NotificationController::class, 'markAsRead']);
+        Route::delete('/{id}', [\App\Http\Controllers\Api\NotificationController::class, 'destroy']);
+    });
 });
 
 Route::get('/auth/google/drive/callback', [\App\Http\Controllers\Api\GoogleDriveController::class, 'callback']);

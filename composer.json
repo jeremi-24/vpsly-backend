@@ -8,6 +8,7 @@
     "require": {
         "php": "^8.3",
         "google/apiclient": "^2.19",
+        "jenssegers/agent": "*",
         "laravel/framework": "^13.0",
         "laravel/reverb": "^1.0",
         "laravel/sanctum": "^4.0",
@@ -78,7 +79,7 @@
         }
     },
     "config": {
-        "optimize-autoloader": true,
+        "optimize-autoloader": false,
         "preferred-install": "dist",
         "sort-packages": true,
         "allow-plugins": {

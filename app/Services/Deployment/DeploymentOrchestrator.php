@@ -39,7 +39,7 @@ class DeploymentOrchestrator
         // Verrouillage de l'application et init déploiement
         Log::info("[Deploy] Locking application and initializing metadata...");
         $app->update(['is_deploying' => true]);
-        
+
         $deployment->update([
             'started_at' => now(),
             'branch' => $app->branch ?? 'main',
@@ -322,6 +322,23 @@ class DeploymentOrchestrator
             !$isFinished,
             $app->last_deployed_at?->toIso8601String()
         ));
+
+        // Notification proactive quand terminé
+        if ($isFinished) {
+            $level = $status === DeploymentStatus::SUCCESS ? 'success' : 'error';
+            $title = $status === DeploymentStatus::SUCCESS ? 'Déploiement réussi' : 'Déploiement échoué';
+            $message = $status === DeploymentStatus::SUCCESS 
+                ? "L'application {$app->name} a été déployée avec succès." 
+                : "Le déploiement de {$app->name} a échoué. Consultez les logs pour plus de détails.";
+
+            $app->user->notify(new \App\Notifications\VpslyNotification(
+                $title,
+                $message,
+                $level,
+                'globe',
+                "/apps/{$app->id}"
+            ));
+        }
     }
 
     /**

@@ -125,4 +125,6 @@ return [
 
     'webhook_secret' => env('WEBHOOK_SECRET', 'vpsly_secret_key'),
 
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+
 ];
