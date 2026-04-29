@@ -84,6 +84,24 @@ class ApplicationBackupController extends Controller
         return response()->json(['message' => 'Sauvegarde supprimée.']);
     }
 
+    public function restore($appId, $backupId)
+    {
+        $application = Application::findOrFail($appId);
+        $backup = Backup::where('application_id', $appId)->findOrFail($backupId);
+
+        // On ne peut pas restaurer si une restauration est déjà en cours
+        if ($backup->status === 'restoring') {
+            return response()->json(['message' => 'Une restauration est déjà en cours.'], 422);
+        }
+
+        // Lancer le Job de restauration
+        \App\Jobs\RestoreBackupJob::dispatch($backup->id);
+
+        return response()->json([
+            'message' => 'La restauration a été lancée en arrière-plan. Vous serez notifié du succès ou de l\'échec.'
+        ]);
+    }
+
     public function download($appId, $backupId)
     {
         $backup = Backup::where('application_id', $appId)->findOrFail($backupId);
@@ -99,10 +117,18 @@ class ApplicationBackupController extends Controller
             $ssh->connect($application->server);
 
             try {
-                $content = $ssh->download($backup->path);
-                return $this->downloadResponse($content, $backup->name);
-            } finally {
+                $localTemp = storage_path("app/temp_dl_" . $backup->id . "_" . time());
+                $ssh->downloadToFile($backup->path, $localTemp);
                 $ssh->disconnect();
+
+                return response()->download($localTemp, $backup->name)->deleteFileAfterSend(true);
+            } catch (\Exception $e) {
+                if (isset($localTemp) && file_exists($localTemp)) {
+                    @unlink($localTemp);
+                }
+                $ssh->disconnect();
+                Log::error("Erreur téléchargement VPS pour backup {$backup->id} : " . $e->getMessage());
+                abort(500, "Erreur lors du téléchargement depuis le serveur.");
             }
         }
 
@@ -119,8 +145,16 @@ class ApplicationBackupController extends Controller
                 if ($settings) {
                     try {
                         $driveService = new \App\Services\Backup\GoogleDriveService($settings);
-                        $content = $driveService->getFileContent($driveId);
-                        return $this->downloadResponse($content, $backup->name);
+                        
+                        return response()->stream(function() use ($driveService, $driveId) {
+                            $stream = $driveService->getDownloadStream($driveId);
+                            while (!$stream->eof()) {
+                                echo $stream->read(1024 * 1024); // 1MB chunks
+                            }
+                        }, 200, [
+                            'Content-Type' => 'application/gzip',
+                            'Content-Disposition' => 'attachment; filename="' . $backup->name . '"',
+                        ]);
                     } catch (\Exception $e) {
                         Log::error("Erreur téléchargement Drive pour backup {$backup->id} : " . $e->getMessage());
                         abort(500, "Erreur lors du téléchargement depuis Google Drive.");
@@ -130,12 +164,5 @@ class ApplicationBackupController extends Controller
         }
 
         abort(404, "Fichier de sauvegarde introuvable (local ou cloud).");
-    }
-
-    protected function downloadResponse($content, $filename)
-    {
-        return response($content)
-            ->header('Content-Type', 'application/gzip')
-            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     }
 }

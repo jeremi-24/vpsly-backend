@@ -86,6 +86,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'index']);
             Route::post('/', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'store']);
             Route::get('/{id}/download', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'download']);
+            Route::post('/{id}/restore', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'restore']);
             Route::delete('/{id}', [\App\Http\Controllers\Api\ApplicationBackupController::class, 'destroy']);
         });
     });

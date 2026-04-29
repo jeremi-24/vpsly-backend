@@ -66,19 +66,34 @@ class GoogleDriveService
                 'parents' => [$targetFolderId]
             ]);
 
-            $content = file_get_contents($filePath);
-            $mimeType = mime_content_type($filePath);
+            // Streaming upload (plus sûr pour les gros fichiers)
+            $chunkSize = 1 * 1024 * 1024; // 1MB chunks
+            $this->client->setDefer(true);
+            $request = $this->service->files->create($fileMetadata);
 
-            $file = $this->service->files->create($fileMetadata, [
-                'data' => $content,
-                'mimeType' => $mimeType,
-                'uploadType' => 'multipart',
-                'fields' => 'id'
-            ]);
+            $media = new \Google\Http\MediaFileUpload(
+                $this->client,
+                $request,
+                mime_content_type($filePath),
+                null,
+                true,
+                $chunkSize
+            );
+            $media->setFileSize(filesize($filePath));
 
-            return $file->id;
+            $status = false;
+            $handle = fopen($filePath, "rb");
+            while (!$status && !feof($handle)) {
+                $chunk = fread($handle, $chunkSize);
+                $status = $media->nextChunk($chunk);
+            }
+            fclose($handle);
+            $this->client->setDefer(false);
+
+            return $status->id;
         } catch (\Exception $e) {
             Log::error("Erreur d'upload Google Drive : " . $e->getMessage());
+            $this->client->setDefer(false);
             throw $e;
         }
     }
@@ -113,6 +128,28 @@ class GoogleDriveService
     }
 
     /**
+     * Télécharge un fichier Google Drive directement vers un chemin local (Streaming)
+     */
+    public function downloadToFile(string $fileId, string $localPath)
+    {
+        try {
+            $response = $this->service->files->get($fileId, ['alt' => 'media']);
+            $body = $response->getBody();
+            
+            $out = fopen($localPath, 'w');
+            while (!$body->eof()) {
+                fwrite($out, $body->read(1024 * 1024)); // Lire par blocs de 1MB
+            }
+            fclose($out);
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Erreur de téléchargement Google Drive vers fichier : " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
      * Récupère le contenu d'un fichier depuis Google Drive
      */
     public function getFileContent(string $fileId)
@@ -136,6 +173,20 @@ class GoogleDriveService
             return true;
         } catch (\Exception $e) {
             Log::error("Erreur de suppression Google Drive : " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Récupère un stream de téléchargement pour un fichier Google Drive
+     */
+    public function getDownloadStream(string $fileId)
+    {
+        try {
+            $response = $this->service->files->get($fileId, ['alt' => 'media']);
+            return $response->getBody();
+        } catch (\Exception $e) {
+            Log::error("Erreur d'obtention du stream Google Drive : " . $e->getMessage());
             throw $e;
         }
     }

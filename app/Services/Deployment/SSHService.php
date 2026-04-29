@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 class SSHService
 {
     protected ?SSH2 $ssh = null;
+    protected $connectionData = null;
 
     public function connect(Server $server): self
     {
@@ -31,6 +32,14 @@ class SSHService
         }
         
         Log::info("[SSH] Login successful.");
+        
+        // On garde les infos pour SFTP si besoin d'upload
+        $this->connectionData = [
+            'host' => $server->ip,
+            'port' => $server->ssh_port,
+            'user' => $server->ssh_user,
+            'key'  => $key
+        ];
 
         
         // Reset timeout pour les commandes potentiellement longues
@@ -108,11 +117,81 @@ class SSHService
         return $output;
     }
 
+    /**
+     * Télécharge un fichier distant vers un chemin local via SFTP.
+     */
+    public function downloadToFile(string $remotePath, string $localPath): void
+    {
+        if (!$this->connectionData) {
+            throw new Exception("SSH connection data missing. Call connect() first.");
+        }
+
+        Log::info("[SFTP] Downloading remote file {$remotePath} to {$localPath}...");
+        
+        $sftp = new \phpseclib3\Net\SFTP($this->connectionData['host'], $this->connectionData['port']);
+        if (!$sftp->login($this->connectionData['user'], $this->connectionData['key'])) {
+            throw new Exception("SFTP authentication failed.");
+        }
+
+        if (!$sftp->get($remotePath, $localPath)) {
+            throw new Exception("SFTP download failed for path: {$remotePath}");
+        }
+
+        Log::info("[SFTP] Download successful.");
+    }
+
     public function disconnect(): void
     {
         if ($this->ssh) {
             $this->ssh->disconnect();
             $this->ssh = null;
         }
+    }
+
+    /**
+     * Upload un fichier sur le serveur via SFTP à partir d'un chemin local.
+     */
+    public function uploadFile(string $remotePath, string $localPath): void
+    {
+        if (!$this->connectionData) {
+            throw new Exception("SSH connection data missing. Call connect() first.");
+        }
+
+        Log::info("[SFTP] Uploading local file {$localPath} to {$remotePath}...");
+        
+        $sftp = new \phpseclib3\Net\SFTP($this->connectionData['host'], $this->connectionData['port']);
+        if (!$sftp->login($this->connectionData['user'], $this->connectionData['key'])) {
+            throw new Exception("SFTP authentication failed.");
+        }
+
+        // SFTP::SOURCE_LOCAL_FILE permet de streamer le fichier depuis le disque
+        if (!$sftp->put($remotePath, $localPath, \phpseclib3\Net\SFTP::SOURCE_LOCAL_FILE)) {
+            throw new Exception("SFTP upload failed for path: {$remotePath}");
+        }
+
+        Log::info("[SFTP] Upload successful.");
+    }
+
+    /**
+     * Upload du contenu brut sur le serveur via SFTP.
+     */
+    public function upload(string $remotePath, string $content): void
+    {
+        if (!$this->connectionData) {
+            throw new Exception("SSH connection data missing. Call connect() first.");
+        }
+
+        Log::info("[SFTP] Uploading file to {$remotePath}...");
+        
+        $sftp = new \phpseclib3\Net\SFTP($this->connectionData['host'], $this->connectionData['port']);
+        if (!$sftp->login($this->connectionData['user'], $this->connectionData['key'])) {
+            throw new Exception("SFTP authentication failed.");
+        }
+
+        if (!$sftp->put($remotePath, $content)) {
+            throw new Exception("SFTP upload failed for path: {$remotePath}");
+        }
+
+        Log::info("[SFTP] Upload successful.");
     }
 }

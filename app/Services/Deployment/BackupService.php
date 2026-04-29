@@ -230,8 +230,8 @@ class BackupService
                     mkdir(dirname($tempPath), 0755, true);
                 }
 
-                $content = $this->ssh->download($backup->path);
-                file_put_contents($tempPath, $content);
+                Log::info("Migration Cloud : TÃ©lÃ©chargement distant vers local ({$tempPath})");
+                $this->ssh->downloadToFile($backup->path, $tempPath);
 
                 // 3. Upload vers Drive (dans vpsly_backups/{appName}/)
                 $driveId = $driveService->uploadFile($tempPath, $backup->name, $app->name);
@@ -260,6 +260,142 @@ class BackupService
                 ]);
             }
         }
+    }
+
+    /**
+     * Restaure une sauvegarde (Base de données ou Volume).
+     */
+    public function restore(Backup $backup)
+    {
+        $app = $backup->application;
+        $this->ssh->connect($app->server);
+
+        try {
+            // 1. Préparer le fichier sur le VPS
+            $restorePath = $backup->path;
+            $isTempFile = false;
+
+            if (!$restorePath) {
+                // Le fichier est sur Drive, on doit le télécharger sur le VPS
+                Log::info("Restauration : Téléchargement depuis Drive pour le backup {$backup->id}");
+                $restorePath = $this->prepareFileFromDrive($backup);
+                $isTempFile = true;
+            }
+
+            // 2. Exécuter la restauration selon le type
+            if ($backup->type === 'db') {
+                $this->restoreDatabase($backup, $restorePath);
+            } else {
+                $this->restoreVolume($backup, $restorePath);
+            }
+
+            // 3. Nettoyage si fichier temporaire
+            if ($isTempFile) {
+                $this->ssh->exec("rm {$restorePath}");
+            }
+
+            Log::info("Restauration réussie pour le backup {$backup->id}");
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error("Échec de la restauration {$backup->id} : " . $e->getMessage());
+            throw $e;
+        } finally {
+            $this->ssh->disconnect();
+        }
+    }
+
+    /**
+     * Télécharge un fichier depuis Drive vers le VPS pour restauration
+     */
+    protected function prepareFileFromDrive(Backup $backup): string
+    {
+        $app = $backup->application;
+        $settings = $app->user->backupSettings()->first();
+        if (!$settings) throw new \Exception("Réglages de sauvegarde introuvables.");
+
+        // Extraire l'ID Drive des notes
+        preg_match('/Google Drive ID: ([a-zA-Z0-9_-]+)/', $backup->notes ?? '', $matches);
+        $driveId = $matches[1] ?? null;
+
+        if (!$driveId) throw new \Exception("ID Google Drive introuvable dans les notes du backup.");
+
+        $driveService = new \App\Services\Backup\GoogleDriveService($settings);
+        
+        // Téléchargement temporaire sur le disque du backend pour économiser la RAM
+        $localTempPath = storage_path("app/temp_restore_" . $backup->id . "_" . time());
+        
+        try {
+            Log::info("Restauration : Téléchargement depuis Drive vers local ({$localTempPath})");
+            $driveService->downloadToFile($driveId, $localTempPath);
+
+            // Envoyer le fichier au VPS via SFTP streaming
+            $remoteTempPath = "/tmp/{$backup->name}";
+            Log::info("Restauration : Envoi du fichier au VPS ({$remoteTempPath})");
+            $this->ssh->uploadFile($remoteTempPath, $localTempPath);
+
+            return $remoteTempPath;
+        } finally {
+            // Nettoyer le fichier temporaire local quoi qu'il arrive
+            if (isset($localTempPath) && file_exists($localTempPath)) {
+                @unlink($localTempPath);
+            }
+        }
+    }
+
+    /**
+     * Exécute la restauration d'une base de données
+     */
+    protected function restoreDatabase(Backup $backup, string $restorePath)
+    {
+        $db = $backup->database;
+        if (!$db) throw new \Exception("Base de données associée introuvable.");
+
+        $isMysql = str_contains(strtolower($db->image), 'mysql') || str_contains(strtolower($db->image), 'mariadb');
+
+        if ($isMysql) {
+             // Commande MySQL sécurisée (2>/dev/null pour cacher le warning de mot de passe)
+             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} mysql --user={$db->postgres_user} --password='{$db->postgres_password}' {$db->postgres_db} 2>/dev/null";
+        } else {
+             // Commande Postgres
+             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} psql -U {$db->postgres_user} {$db->postgres_db}";
+        }
+
+        Log::info("Exécution de la commande de restauration DB: {$restoreCmd}");
+        $this->ssh->exec($restoreCmd);
+    }
+
+    /**
+     * Exécute la restauration d'un volume
+     */
+    protected function restoreVolume(Backup $backup, string $restorePath)
+    {
+        $app = $backup->application;
+        
+        // On essaie de retrouver le volume via le mount_path stocké dans les notes
+        preg_match('/Volume: (.+)/', $backup->notes ?? '', $matches);
+        $mountPath = $matches[1] ?? null;
+
+        if (!$mountPath) throw new \Exception("Chemin du volume introuvable dans les notes.");
+
+        $volume = \App\Models\LocalPersistentVolume::where('resource_id', $app->id)
+            ->where('resource_type', Application::class)
+            ->where('mount_path', $mountPath)
+            ->first();
+
+        if (!$volume) throw new \Exception("Volume persistant introuvable pour le chemin {$mountPath}.");
+
+        $hostPath = $volume->host_path;
+        if (!$hostPath) {
+            $appSlug = preg_replace('/[^a-z0-9\-]/', '-', strtolower($app->name));
+            $hostPath = "/var/lib/docker/volumes/{$appSlug}_{$volume->name}/_data";
+        }
+
+        // Restauration (on vide le dossier avant pour être propre ?)
+        // Attention: vider peut être dangereux. On va juste extraire par dessus (tar écrase par défaut).
+        $tarCmd = "tar -xzf {$restorePath} -C {$hostPath}";
+        Log::info("Exécution de la commande de restauration Volume: {$tarCmd}");
+        $this->ssh->exec($tarCmd);
     }
 
     /**
