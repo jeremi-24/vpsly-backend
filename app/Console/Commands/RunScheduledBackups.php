@@ -91,21 +91,32 @@ class RunScheduledBackups extends Command
         if ($frequency === 'manual') return false;
 
         $now = now();
-        $currentTime = $now->format('H:i');
 
-        // On vérifie si l'heure d'exécution est passée
-        if ($currentTime < $executionTime) return false;
+        // Utilisation de Carbon pour une comparaison d'objets DateTime fiable
+        try {
+            $scheduled = $now->copy()->setTimeFromTimeString($executionTime);
+        } catch (\Exception $e) {
+            Log::error("Format d'heure invalide pour le backup : {$executionTime}");
+            return false;
+        }
 
-        // On vérifie la fréquence
-        $lastBackup = $app->backups()->latest()->first();
-        if (!$lastBackup) return true; // Premier backup
+        // Si l'heure prévue n'est pas encore atteinte, on ne fait rien
+        if ($now->lt($scheduled)) return false;
+
+        // On vérifie la fréquence par rapport au dernier backup réussi
+        $lastBackup = $app->backups()->where('status', 'success')->latest()->first();
+        
+        if (!$lastBackup) return true; // Premier backup réussi à faire
 
         switch ($frequency) {
             case 'hourly':
-                return $lastBackup->created_at->diffInHours($now) >= 1;
+                // Au moins 60 minutes depuis le dernier backup
+                return $lastBackup->created_at->diffInMinutes($now) >= 60;
             case 'daily':
+                // Pas encore de backup aujourd'hui
                 return !$lastBackup->created_at->isToday();
             case 'weekly':
+                // Au moins 7 jours depuis le dernier backup
                 return $lastBackup->created_at->diffInDays($now) >= 7;
             default:
                 return false;
