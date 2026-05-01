@@ -110,4 +110,29 @@ class TeamController extends Controller
             'team' => $invitation->team
         ]);
     }
+    public function members(Request $request, Team $team)
+    {
+        if (!$request->user()->canAccessTeam($team)) {
+            return response()->json(['message' => 'Accès refusé'], 403);
+        }
+
+        return $team->members()->select('users.id', 'users.name', 'users.email', 'team_user.role', 'team_user.created_at')->get();
+    }
+
+    public function removeMember(Request $request, Team $team, \App\Models\User $user)
+    {
+        // 1. Seul le owner peut retirer des membres
+        if ($team->owner_id !== $request->user()->id) {
+            return response()->json(['message' => 'Action non autorisée'], 403);
+        }
+
+        // 2. On ne peut pas se retirer soi-même (utiliser un autre endpoint si besoin, mais ici c'est de la gestion)
+        if ($user->id === $request->user()->id) {
+            return response()->json(['message' => 'Vous ne pouvez pas vous retirer vous-même de votre propre équipe'], 422);
+        }
+
+        $team->members()->detach($user->id);
+
+        return response()->json(['message' => 'Membre retiré avec succès']);
+    }
 }
