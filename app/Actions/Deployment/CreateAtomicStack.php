@@ -28,38 +28,44 @@ class CreateAtomicStack
         // 1. Création de l'Application
         $app = Application::create([
             'name' => $data['name'],
+            'deployment_mode' => $data['deployment_mode'] ?? 'docker',
             'repo_url' => $data['repo_url'],
             'branch' => $data['branch'] ?? 'main',
             'server_id' => $server->id,
             'user_id' => $data['user_id'],
+            'target_path' => $data['target_path'] ?? null,
+            'deploy_script' => $data['deploy_script'] ?? null,
+            'log_command' => $data['log_command'] ?? null,
             'status' => 'preparing',
-            'build_pack' => "nixpacks:{$preset}",
+            'build_pack' => ($data['deployment_mode'] ?? 'docker') === 'docker' ? "nixpacks:{$preset}" : 'ssh',
             'is_deploying' => true,
         ]);
 
-        // 1.5. Tentative de création du Webhook GitHub (Zéro Config)
-        try {
-            $user = \App\Models\User::find($data['user_id']);
-            if ($user && $user->github_token) {
-                // Extraction owner/repo de l'URL (ex: https://github.com/owner/repo)
-                $urlPath = parse_url($data['repo_url'], PHP_URL_PATH);
-                $parts = explode('/', trim($urlPath, '/'));
-                
-                if (count($parts) >= 2) {
-                    $owner = $parts[0];
-                    $repo = $parts[1];
-                    $repo = str_replace('.git', '', $repo);
+        // 1.5. Tentative de création du Webhook GitHub (Zéro Config) - Uniquement Docker
+        if ($app->deployment_mode === 'docker') {
+            try {
+                $user = \App\Models\User::find($data['user_id']);
+                if ($user && $user->github_token) {
+                    // Extraction owner/repo de l'URL (ex: https://github.com/owner/repo)
+                    $urlPath = parse_url($data['repo_url'], PHP_URL_PATH);
+                    $parts = explode('/', trim($urlPath, '/'));
+                    
+                    if (count($parts) >= 2) {
+                        $owner = $parts[0];
+                        $repo = $parts[1];
+                        $repo = str_replace('.git', '', $repo);
 
-                    $callbackUrl = config('app.url') . '/api/webhooks/github';
-                    
-                    $hookId = $this->github->createWebhook($user, $owner, $repo, $callbackUrl);
-                    
-                    $app->update(['github_hook_id' => $hookId]);
+                        $callbackUrl = config('app.url') . '/api/webhooks/github';
+                        
+                        $hookId = $this->github->createWebhook($user, $owner, $repo, $callbackUrl);
+                        
+                        $app->update(['github_hook_id' => $hookId]);
+                    }
                 }
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning("Impossible de créer le webhook GitHub : " . $e->getMessage());
+                // On ne bloque pas la création de l'app si le webhook échoue
             }
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning("Impossible de créer le webhook GitHub : " . $e->getMessage());
-            // On ne bloque pas la création de l'app si le webhook échoue
         }
 
         // 2. Injection des variables du Preset

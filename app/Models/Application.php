@@ -24,6 +24,10 @@ class Application extends BaseModel
         'github_hook_id',
         'has_laravel_scheduler',
         'last_cron_synced_at',
+        'deployment_mode',
+        'target_path',
+        'deploy_script',
+        'log_command',
     ];
 
     protected function casts(): array

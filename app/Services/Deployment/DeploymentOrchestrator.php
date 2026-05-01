@@ -46,6 +46,12 @@ class DeploymentOrchestrator
         ]);
 
         try {
+            // Bifurcation selon le mode de déploiement
+            if ($app->deployment_mode === 'legacy_existing') {
+                $this->deployLegacy($app, $server, $deployment);
+                return;
+            }
+
             // STEP 1: PREPARING
             Log::info("[Deploy] Step 1: Preparing status...");
             $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
@@ -348,8 +354,8 @@ class DeploymentOrchestrator
         if ($isFinished) {
             $level = $status === DeploymentStatus::SUCCESS ? 'success' : 'error';
             $title = $status === DeploymentStatus::SUCCESS ? 'Déploiement réussi' : 'Déploiement échoué';
-            $message = $status === DeploymentStatus::SUCCESS 
-                ? "L'application {$app->name} a été déployée avec succès." 
+            $message = $status === DeploymentStatus::SUCCESS
+                ? "L'application {$app->name} a été déployée avec succès."
                 : "Le déploiement de {$app->name} a échoué. Consultez les logs pour plus de détails.";
 
             $app->user->notify(new \App\Notifications\VpslyNotification(
@@ -415,6 +421,48 @@ class DeploymentOrchestrator
             ]);
             $this->ssh->exec($command);
         }
+    }
+
+    /**
+     * Déploiement Legacy : Exécution directe de scripts SSH dans un dossier existant.
+     */
+    protected function deployLegacy(Application $app, Server $server, Deployment $deployment): void
+    {
+        $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
+        $this->streamer->log($deployment, " Connecting to VPS {$server->ip} for Legacy Deployment...", LogType::INFO);
+
+        $this->ssh->connect($server);
+
+        $targetPath = $app->target_path;
+        $script = $app->deploy_script;
+
+        // Vérification de l'existence du dossier
+        $dirExists = trim($this->ssh->exec("[ -d \"{$targetPath}\" ] && echo 'yes' || echo 'no'"));
+        if ($dirExists !== 'yes') {
+            throw new \App\Exceptions\Deployment\NonRetryableException("Le dossier cible n'existe pas sur le serveur : {$targetPath}");
+        }
+
+        $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
+        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+        $this->streamer->log($deployment, " Starting script execution in {$targetPath}", LogType::INFO);
+
+        $commands = collect(explode("\n", $script))
+            ->map(fn($cmd) => trim($cmd))
+            ->filter(fn($cmd) => !empty($cmd) && !str_starts_with($cmd, '#'));
+
+        foreach ($commands as $command) {
+            $this->streamer->log($deployment, " $ {$command}", LogType::INFO);
+
+            $this->ssh->stream("cd \"{$targetPath}\" && {$command}", function ($line) use ($deployment) {
+                $this->streamer->log($deployment, $line, LogType::DEBUG);
+            });
+        }
+
+        $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
+        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+        $this->streamer->log($deployment, " Legacy deployment successful!", LogType::SUCCESS);
+
+        $this->cleanup($deployment);
     }
 
     /**

@@ -27,6 +27,18 @@ class RuntimeLogService
      */
     public function getLastLogs($resource, int $limit = 100): array
     {
+        if ($resource instanceof Application && $resource->deployment_mode === 'legacy_existing') {
+            if ($resource->log_command) {
+                try {
+                    $output = $this->ssh->exec("cd \"{$resource->target_path}\" && {$resource->log_command}");
+                    return explode("\n", trim($output));
+                } catch (\Exception $e) {
+                    return ["Erreur lors de l'exécution de la commande de logs : " . $e->getMessage()];
+                }
+            }
+            return ["Logs Docker non disponibles. Veuillez configurer une 'Commande de logs' (ex: pm2 logs) pour cette application Legacy."];
+        }
+
         $containerName = $this->getContainerName($resource);
         $command = "docker logs --tail {$limit} {$containerName} 2>&1";
 
@@ -47,12 +59,20 @@ class RuntimeLogService
      */
     public function streamLogs($resource, ?string $channelName = null): void
     {
-        $containerName = $this->getContainerName($resource);
-        $command = "docker logs -f --tail 0 {$containerName} 2>&1";
+        if ($resource instanceof Application && $resource->deployment_mode === 'legacy_existing') {
+            if (!$resource->log_command) {
+                Log::info("[RuntimeLog] Skipping stream for legacy application (no log command): {$resource->name}");
+                return;
+            }
+            $command = "cd \"{$resource->target_path}\" && {$resource->log_command}";
+        } else {
+            $containerName = $this->getContainerName($resource);
+            $command = "docker logs -f --tail 0 {$containerName} 2>&1";
+        }
         
         $channelName = $channelName ?? 'application.' . $resource->id;
 
-        Log::info("[RuntimeLog] Starting stream for {$resource->name} (Container: {$containerName})");
+        Log::info("[RuntimeLog] Starting stream for {$resource->name} (Command: {$command})");
 
         $this->ssh->stream($command, function($line) use ($resource, $channelName) {
             if (trim($line)) {

@@ -24,25 +24,31 @@ class ApplicationController extends Controller
         $request->validate([
             'server_id' => 'required|exists:servers,id',
             'name' => 'required|string|unique:applications,name',
-            'repo_url' => 'required|url',
+            'deployment_mode' => 'required|string|in:docker,legacy_existing',
+            'repo_url' => 'required_if:deployment_mode,docker|nullable|url',
             'branch' => 'nullable|string',
             'domain' => 'nullable|string',
-            'preset' => 'nullable|string', // Ajout du preset
+            'preset' => 'nullable|string',
+            'target_path' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'log_command' => 'nullable|string',
         ]);
         $user = auth()->user();
 
-        // Empêcher les doublons (même repo et même branche)
-        $existing = Application::where('repo_url', $request->repo_url)
-            ->where('branch', $request->branch ?? 'main')
-            ->first();
+        // Empêcher les doublons (même repo et même branche) - Uniquement pour Docker
+        if ($request->deployment_mode === 'docker') {
+            $existing = Application::where('repo_url', $request->repo_url)
+                ->where('branch', $request->branch ?? 'main')
+                ->first();
 
-        if ($existing) {
-            return response()->json([
-                'message' => 'Une application utilisant ce dépôt et cette branche existe déjà.',
-                'errors' => [
-                    'repo_url' => ['Ce dépôt et cette branche sont déjà utilisés par l\'application : ' . $existing->name]
-                ]
-            ], 422);
+            if ($existing) {
+                return response()->json([
+                    'message' => 'Une application utilisant ce dépôt et cette branche existe déjà.',
+                    'errors' => [
+                        'repo_url' => ['Ce dépôt et cette branche sont déjà utilisés par l\'application : ' . $existing->name]
+                    ]
+                ], 422);
+            }
         }
 
         // Utilisation de notre nouvelle action atomique via le container
@@ -50,10 +56,13 @@ class ApplicationController extends Controller
             'user_id' => $user->id,
             'server_id' => $request->server_id,
             'name' => $request->name,
+            'deployment_mode' => $request->deployment_mode,
             'repo_url' => $request->repo_url,
             'branch' => $request->branch ?? 'main',
             'domain' => $request->domain,
             'preset' => $request->preset ?? 'generic',
+            'target_path' => $request->target_path,
+            'deploy_script' => $request->deploy_script,
         ]);
 
         return response()->json([
@@ -61,6 +70,41 @@ class ApplicationController extends Controller
             'application' => $result['application']->load('server'),
             'deployment_id' => $result['deployment']->id
         ], 201);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $app = Application::findOrFail($id);
+
+        $request->validate([
+            'server_id' => 'required|exists:servers,id',
+            'name' => 'required|string|unique:applications,name,' . $app->id,
+            'deployment_mode' => 'required|string|in:docker,legacy_existing',
+            'repo_url' => 'required_if:deployment_mode,docker|nullable|url',
+            'branch' => 'nullable|string',
+            'domain' => 'nullable|string',
+            'preset' => 'nullable|string',
+            'target_path' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'log_command' => 'nullable|string',
+        ]);
+
+        $app->update([
+            'name' => $request->name,
+            'repo_url' => $request->repo_url,
+            'branch' => $request->branch ?? 'main',
+            'server_id' => $request->server_id,
+            'domain' => $request->domain,
+            'preset' => $request->preset ?? 'generic',
+            'target_path' => $request->target_path,
+            'deploy_script' => $request->deploy_script,
+            'log_command' => $request->log_command,
+        ]);
+
+        return response()->json([
+            'message' => 'Application mise à jour avec succès.',
+            'application' => $app->load('server')
+        ]);
     }
 
     public function show($id)
