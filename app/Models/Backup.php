@@ -4,11 +4,16 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class Backup extends Model
+use App\Traits\HasTeam;
+
+class Backup extends BaseModel
 {
+    use HasTeam;
+
     protected $fillable = [
         'application_id',
         'database_id',
+        'team_id',
         'name',
         'type',
         'status',

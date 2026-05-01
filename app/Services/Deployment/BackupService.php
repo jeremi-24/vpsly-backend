@@ -39,7 +39,8 @@ class BackupService
             $backup->update([
                 'name' => $filename,
                 'path' => $backupPath,
-                'status' => 'pending'
+                'status' => 'pending',
+                'team_id' => $app->team_id,
             ]);
         } else {
             $backup = Backup::create([
@@ -49,6 +50,7 @@ class BackupService
                 'type' => 'db',
                 'status' => 'pending',
                 'path' => $backupPath,
+                'team_id' => $app->team_id,
             ]);
         }
 
@@ -136,6 +138,7 @@ class BackupService
                 'path' => $backupPath,
                 'status' => 'pending',
                 'notes' => "Volume: {$volume->mount_path}",
+                'team_id' => $app->team_id,
             ]);
         } else {
             $backup = Backup::create([
@@ -145,6 +148,7 @@ class BackupService
                 'status' => 'pending',
                 'path' => $backupPath,
                 'notes' => "Volume: {$volume->mount_path}",
+                'team_id' => $app->team_id,
             ]);
         }
 
@@ -207,10 +211,7 @@ class BackupService
      */
     protected function exportToExternalStorage(Backup $backup, Application $app)
     {
-        $user = $app->user;
-        if (!$user) return;
-
-        $settings = $user->backupSettings()->first();
+        $settings = \App\Models\BackupSetting::where('team_id', $app->team_id)->first();
         if (!$settings || $settings->storage_destination === 'local') {
             return;
         }
@@ -309,8 +310,8 @@ class BackupService
     protected function prepareFileFromDrive(Backup $backup): string
     {
         $app = $backup->application;
-        $settings = $app->user->backupSettings()->first();
-        if (!$settings) throw new \Exception("Réglages de sauvegarde introuvables.");
+        $settings = \App\Models\BackupSetting::where('team_id', $app->team_id)->first();
+        if (!$settings) throw new \Exception("Réglages de sauvegarde introuvables pour cette équipe.");
 
         // Extraire l'ID Drive des notes
         preg_match('/Google Drive ID: ([a-zA-Z0-9_-]+)/', $backup->notes ?? '', $matches);

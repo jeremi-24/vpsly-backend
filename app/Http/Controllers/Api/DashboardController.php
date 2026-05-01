@@ -18,22 +18,12 @@ class DashboardController extends Controller
 
     public function index(): JsonResponse
     {
-        $user = auth()->user();
-        
-        $appsCount = Application::whereHas('server', function($q) use ($user) {
-            $q->where('user_id', $user->id);
-        })->count();
+        $appsCount = Application::count();
+        $dbCount = StandaloneDatabase::count();
+        $deploymentsToday = Deployment::whereDate('created_at', now()->toDateString())->count();
 
-        $dbCount = StandaloneDatabase::whereHas('server', function($q) use ($user) {
-            $q->where('user_id', $user->id);
-        })->count();
-
-        $deploymentsToday = Deployment::whereHas('application.server', function($q) use ($user) {
-            $q->where('user_id', $user->id);
-        })->whereDate('created_at', now()->toDateString())->count();
-
-        // Stats Globales (Moyenne sur tous les serveurs de l'user)
-        $servers = Server::where('user_id', $user->id)->get();
+        // Stats Globales
+        $servers = Server::all();
         $totalCpu = 0;
         $totalMem = 0;
         $serversWithStats = 0;
@@ -49,9 +39,6 @@ class DashboardController extends Controller
 
         // Derniers déploiements
         $recentDeployments = Deployment::with('application')
-            ->whereHas('application.server', function($q) use ($user) {
-                $q->where('user_id', $user->id);
-            })
             ->latest()
             ->limit(5)
             ->get()
@@ -59,22 +46,19 @@ class DashboardController extends Controller
                 return [
                     'id' => $d->id,
                     'application_id' => $d->application_id,
-                    'app_name' => $d->application->name,
-                    'branch' => $d->application->branch,
+                    'app_name' => $d->application->name ?? 'Unknown',
+                    'branch' => $d->application->branch ?? '-',
                     'status' => $d->status,
                     'created_at' => $d->created_at->toDateTimeString(),
                     'time_ago' => $d->created_at->diffForHumans(),
                 ];
             });
 
-        // Données pour le graphique (déploiements par mois)
+        // Données pour le graphique
         $isSqlite = config('database.default') === 'sqlite';
         $monthFunc = $isSqlite ? "strftime('%m', created_at)" : "MONTH(created_at)";
 
-        $overviewData = Deployment::whereHas('application.server', function($q) use ($user) {
-                $q->where('user_id', $user->id);
-            })
-            ->selectRaw("{$monthFunc} as month, COUNT(*) as count")
+        $overviewData = Deployment::selectRaw("{$monthFunc} as month, COUNT(*) as count")
             ->whereYear('created_at', now()->year)
             ->groupBy('month')
             ->orderBy('month')
@@ -87,7 +71,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Top 3 Serveurs avec stats détaillées
+        // Top 3 Serveurs
         $topServers = $servers->take(3)->map(function($server) {
             $stats = $this->monitoring->getServerStats($server);
             return [

@@ -2,13 +2,14 @@
   
 namespace App\Models;
   
+use App\Traits\HasTeam;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class EnvironmentVariable extends Model
 {
-    use SoftDeletes;
+    use SoftDeletes, HasTeam;
 
     protected $fillable = [
         'application_id',

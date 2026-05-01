@@ -12,10 +12,8 @@ class ApplicationController extends Controller
 {
     public function index()
     {
-        $user = auth()->user();
         return response()->json(
             Application::with(['server', 'databases', 'persistentVolumes'])
-                ->where('user_id', $user->id)
                 ->latest()
                 ->get()
         );
@@ -36,7 +34,6 @@ class ApplicationController extends Controller
         // Empêcher les doublons (même repo et même branche)
         $existing = Application::where('repo_url', $request->repo_url)
             ->where('branch', $request->branch ?? 'main')
-            ->where('user_id', $user->id)
             ->first();
 
         if ($existing) {
@@ -76,7 +73,6 @@ class ApplicationController extends Controller
                 'databases',
                 'persistentVolumes',
             ])
-            ->where('user_id', $user->id)
             ->findOrFail($id);
 
         return response()->json($app);
@@ -85,7 +81,7 @@ class ApplicationController extends Controller
     public function destroy($id, \App\Services\GitHubService $github)
     {
         $user = auth()->user();
-        $app = Application::where('user_id', $user->id)->findOrFail($id);
+        $app = Application::findOrFail($id);
 
         // 1. Dispatch du nettoyage serveur (Avant de supprimer le modèle !)
         \App\Jobs\DeleteApplicationJob::dispatch((int)$app->server_id, (string)$app->slug);
@@ -113,7 +109,7 @@ class ApplicationController extends Controller
     public function deployments($id)
     {
         $user = auth()->user();
-        $app = Application::where('user_id', $user->id)->findOrFail($id);
+        $app = Application::findOrFail($id);
         
         return response()->json(
             $app->deployments()->latest()->paginate(20)

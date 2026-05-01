@@ -13,6 +13,7 @@ class DeploymentLoggerService
         DeploymentLog::create([
             'deployment_id' => $deployment->id,
             'line' => $line,
+            'team_id' => $deployment->team_id,
         ]);
 
         // 2. Dispatch de l'évènement Reverb pour le terminal auto-scroll en live

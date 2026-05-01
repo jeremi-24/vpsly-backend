@@ -6,10 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+use App\Traits\HasTeam;
+
 class Deployment extends Model
 {
+    use HasTeam;
     protected $fillable = [
         'application_id',
+        'team_id',
         'branch',
         'deployment_uuid',
         'status',

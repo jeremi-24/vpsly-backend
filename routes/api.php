@@ -21,6 +21,15 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
     Route::put('/user', [\App\Http\Controllers\Api\UserController::class, 'update']);
+    
+    // Teams
+    Route::get('/teams', [\App\Http\Controllers\Api\TeamController::class, 'index']);
+    Route::post('/teams', [\App\Http\Controllers\Api\TeamController::class, 'store']);
+    Route::post('/teams/{team}/switch', [\App\Http\Controllers\Api\TeamController::class, 'switch']);
+    Route::post('/teams/invitations', [\App\Http\Controllers\Api\TeamController::class, 'createInvitation']);
+    Route::post('/teams/invitations/{token}/accept', [\App\Http\Controllers\Api\TeamController::class, 'acceptInvitation']);
+    Route::get('/teams/{team}/members', [\App\Http\Controllers\Api\TeamController::class, 'members']);
+    Route::delete('/teams/{team}/members/{user}', [\App\Http\Controllers\Api\TeamController::class, 'removeMember']);
 
     // Route d'authentification Broadcast personnalisée (pour contourner les problèmes de middleware par défaut)
     Route::post('/broadcasting/auth', function (Request $request) {

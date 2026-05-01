@@ -1,0 +1,113 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use App\Models\Team;
+use App\Models\TeamInvitation;
+use Illuminate\Support\Str;
+
+class TeamController extends Controller
+{
+    public function index(Request $request)
+    {
+        return $request->user()->teams()->with('owner:id,name')->get();
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+        ]);
+
+        $user = $request->user();
+
+        // 1. Création de l'équipe
+        $team = Team::create([
+            'name' => $validated['name'],
+            'owner_id' => $user->id,
+        ]);
+
+        // 2. Attacher l'utilisateur avec le rôle owner
+        $user->teams()->attach($team->id, ['role' => 'owner']);
+
+        // 3. Switcher vers cette équipe
+        $user->update(['current_team_id' => $team->id]);
+
+        return response()->json([
+            'message' => 'Espace de travail créé avec succès',
+            'team' => $team
+        ], 201);
+    }
+
+    public function switch(Request $request, Team $team)
+    {
+        if (!$request->user()->canAccessTeam($team)) {
+            return response()->json(['message' => 'Accès refusé'], 403);
+        }
+
+        $user = $request->user();
+        $user->current_team_id = $team->id;
+        $user->save();
+
+        \Illuminate\Support\Facades\Log::info("User {$user->id} switched to team {$team->id}");
+
+        return response()->json([
+            'message' => 'Équipe changée avec succès',
+            'team' => $team
+        ]);
+    }
+
+    public function createInvitation(Request $request)
+    {
+        $request->validate([
+            'team_id' => 'required|exists:teams,id',
+            'role' => 'nullable|string|in:admin,member',
+        ]);
+
+        $team = Team::findOrFail($request->team_id);
+
+        if ($team->owner_id !== $request->user()->id) {
+            return response()->json(['message' => 'Seul le propriétaire peut inviter'], 403);
+        }
+
+        $invitation = TeamInvitation::create([
+            'team_id' => $team->id,
+            'token' => Str::random(40),
+            'role' => $request->role ?? 'member',
+            'expires_at' => now()->addDays(7),
+        ]);
+
+        $frontendUrl = env('FRONTEND_URL', 'http://localhost:5173');
+
+        return response()->json([
+            'invitation_url' => $frontendUrl . '/invitations/' . $invitation->token
+        ]);
+    }
+
+    public function acceptInvitation(Request $request, $token)
+    {
+        $invitation = TeamInvitation::where('token', $token)
+            ->where(function ($query) {
+                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->firstOrFail();
+
+        $user = $request->user();
+
+        // Join the team
+        $user->teams()->syncWithoutDetaching([$invitation->team_id => ['role' => $invitation->role]]);
+        
+        // Set as current team
+        $user->update(['current_team_id' => $invitation->team_id]);
+
+        // Delete invitation (one-time use)
+        $invitation->delete();
+
+        return response()->json([
+            'message' => "Vous avez rejoint l'équipe : " . $invitation->team->name,
+            'team' => $invitation->team
+        ]);
+    }
+}

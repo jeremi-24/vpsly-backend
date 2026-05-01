@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use App\Traits\HasTeam;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ApplicationBackupOverride extends Model
 {
+    use HasTeam;
     protected $fillable = [
         'application_id',
         'is_enabled',

@@ -28,7 +28,8 @@ class DeploymentController extends Controller
             \App\Models\DeploymentLog::create([
                 'deployment_id' => $deployment->id,
                 'line' => 'Deployment locked: Another process is already running for this application.',
-                'type' => 'error'
+                'type' => 'error',
+                'team_id' => $deployment->team_id,
             ]);
 
             return response()->json([

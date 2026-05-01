@@ -2,14 +2,16 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasTeam;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Application extends Model
+class Application extends BaseModel
 {
+    use HasTeam;
     protected $fillable = [
         'user_id',
+        'team_id',
         'server_id',
         'name',
         'repo_url',
@@ -80,12 +82,7 @@ class Application extends Model
      */
     public function resolveRouteBinding($value, $field = null)
     {
-        if (auth()->check()) {
-            return $this->where('user_id', auth()->id())
-                ->where($field ?? $this->getRouteKeyName(), $value)
-                ->firstOrFail();
-        }
-
-        return parent::resolveRouteBinding($value, $field);
+        return $this->where($field ?? $this->getRouteKeyName(), $value)
+            ->firstOrFail();
     }
 }

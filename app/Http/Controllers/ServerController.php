@@ -24,7 +24,7 @@ class ServerController extends Controller
     public function index()
     {
         return response()->json(
-            Server::where('user_id', auth()->id())->get()
+            Server::all()
         );
     }
 
@@ -165,7 +165,8 @@ class ServerController extends Controller
      */
     protected function authorizeOwner(Server $server)
     {
-        if ($server->user_id !== auth()->id()) {
+        if ($server->team_id !== auth()->user()->current_team_id) {
+            \Illuminate\Support\Facades\Log::warning("Accès refusé au serveur {$server->id}. Équipe serveur: {$server->team_id}, Équipe utilisateur: " . auth()->user()->current_team_id);
             abort(403, 'Accès non autorisé à ce serveur.');
         }
     }

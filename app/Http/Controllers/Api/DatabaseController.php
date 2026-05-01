@@ -15,9 +15,6 @@ class DatabaseController extends Controller
     public function index(Request $request)
     {
         return StandaloneDatabase::with('server')
-            ->whereHas('server', function ($query) {
-                $query->where('user_id', auth()->id());
-            })
             ->latest()
             ->get();
     }
@@ -35,8 +32,8 @@ class DatabaseController extends Controller
             'has_adminer' => 'nullable|boolean',
         ]);
 
-        // Vérifier que le serveur appartient bien à l'utilisateur
-        $server = Server::where('user_id', auth()->id())->findOrFail($validated['server_id']);
+        // Vérifier que le serveur est accessible (Le Global Scope gère déjà le filtrage par équipe)
+        $server = Server::findOrFail($validated['server_id']);
 
         $defaultImages = [
             'postgres' => 'postgres:15-alpine',
@@ -259,7 +256,9 @@ class DatabaseController extends Controller
      */
     protected function authorizeOwner(StandaloneDatabase $database)
     {
-        if ($database->server->user_id !== auth()->id()) {
+        // On vérifie que la base appartient à l'équipe active de l'utilisateur
+        // Le Global Scope fait déjà 90% du travail, mais on sécurise ici
+        if ($database->team_id !== auth()->user()->current_team_id) {
             abort(403, 'Accès non autorisé à cette base de données.');
         }
     }

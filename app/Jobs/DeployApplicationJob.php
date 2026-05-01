@@ -5,7 +5,6 @@ namespace App\Jobs;
 use App\Models\Application;
 use App\Models\Deployment;
 use App\Models\Server;
-use App\Services\DeploymentService;
 use Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;

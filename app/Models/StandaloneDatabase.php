@@ -6,9 +6,11 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+use App\Traits\HasTeam;
+
 class StandaloneDatabase extends BaseModel
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, SoftDeletes, HasTeam;
 
     protected $table = 'standalone_databases';
 
@@ -39,6 +41,7 @@ class StandaloneDatabase extends BaseModel
         'started_at',
         'server_id',
         'application_id',
+        'team_id',
     ];
 
     protected $appends = [

@@ -34,13 +34,23 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
+        // Création de l'équipe personnelle par défaut
+        $team = \App\Models\Team::create([
+            'name' => 'Mon Espace',
+            'owner_id' => $user->id,
+        ]);
+
+        // Attachement et définition comme équipe courante
+        $user->teams()->attach($team->id, ['role' => 'owner']);
+        $user->update(['current_team_id' => $team->id]);
+
         // Envoi du mail de bienvenue
         $user->notify(new WelcomeNotification($user));
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->load('currentTeam'),
             'access_token' => $token,
             'token_type' => 'Bearer',
         ]);
@@ -78,7 +88,7 @@ class AuthController extends Controller
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->load('currentTeam'),
             'access_token' => $token,
             'token_type' => 'Bearer',
         ]);

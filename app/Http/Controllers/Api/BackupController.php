@@ -17,10 +17,7 @@ class BackupController extends Controller
 
         // On récupère les sauvegardes des applications appartenant à l'utilisateur avec pagination
         return response()->json(
-            Backup::whereHas('application', function($query) use ($user) {
-                $query->where('user_id', $user->id);
-            })
-            ->with(['application:id,name,server_id', 'application.server:id,name'])
+            Backup::with(['application:id,name,server_id', 'application.server:id,name'])
             ->latest()
             ->paginate(10)
             ->through(function($backup) {

@@ -6,8 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Server extends Model
+use App\Traits\HasTeam;
+
+class Server extends BaseModel
 {
+    use HasTeam;
+
     protected $guarded = [];
 
     /**
