@@ -64,11 +64,16 @@ class AuthController extends Controller
             ]);
         }
 
-        // Envoi du mail d'alerte sécurité
-        $user->notify(new LoginSecurityNotification([
-            'ip' => $request->ip(),
-            'user_agent' => $request->userAgent(),
-        ]));
+        // Alerte de sécurité pour la connexion (uniquement si l'IP change)
+        $currentIp = $request->ip();
+        if ($user->last_login_ip !== $currentIp) {
+            $user->notify(new LoginSecurityNotification([
+                'ip' => $currentIp,
+                'user_agent' => $request->userAgent(),
+            ]));
+
+            $user->update(['last_login_ip' => $currentIp]);
+        }
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
