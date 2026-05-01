@@ -135,4 +135,28 @@ class TeamController extends Controller
 
         return response()->json(['message' => 'Membre retiré avec succès']);
     }
+
+    public function leave(Request $request, Team $team)
+    {
+        $user = $request->user();
+
+        // Le propriétaire ne peut pas quitter son propre espace
+        if ($team->owner_id === $user->id) {
+            return response()->json(['message' => 'Le propriétaire ne peut pas quitter son propre espace. Supprimez l\'espace ou transférez la propriété.'], 422);
+        }
+
+        if (!$user->canAccessTeam($team)) {
+            return response()->json(['message' => 'Vous n\'êtes pas membre de cet espace'], 403);
+        }
+
+        $team->members()->detach($user->id);
+
+        // Basculer sur une autre équipe si c'était l'équipe courante
+        if ($user->current_team_id === $team->id) {
+            $nextTeam = $user->teams()->first();
+            $user->update(['current_team_id' => $nextTeam?->id]);
+        }
+
+        return response()->json(['message' => 'Vous avez quitté l\'équipe']);
+    }
 }
