@@ -4,7 +4,7 @@ namespace App\Services\Deployment;
 
 use App\Models\Application;
 use App\Models\Backup;
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Services\Deployment\SSHService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -21,7 +21,7 @@ class BackupService
     /**
      * Crée une sauvegarde d'une base de données liée à une application.
      */
-    public function createDatabaseBackup(Application $app, StandalonePostgresql $db, ?int $backupId = null): Backup
+    public function createDatabaseBackup(Application $app, StandaloneDatabase $db, ?int $backupId = null): Backup
     {
         $this->ssh->connect($app->server);
 
@@ -53,21 +53,19 @@ class BackupService
         }
 
         try {
-            $isMysql = str_contains(strtolower($db->image), 'mysql') || str_contains(strtolower($db->image), 'mariadb');
+            $type = $db->type;
             
-            if ($isMysql) {
+            if ($type === 'mysql' || $type === 'mariadb') {
                 // Approche Sidecar pour MySQL
-                // On utilise mysql:8.4 qui contient mysqldump
-                // On ajoute --no-tablespaces pour éviter les erreurs de privilèges PROCESS
                 $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
                            "mysql:8.4 " .
-                           "mysqldump --no-tablespaces -h {$db->uuid} -u {$db->postgres_user} -p'{$db->postgres_password}' {$db->postgres_db} > {$backupPath}\"";
+                           "mysqldump --no-tablespaces -h {$db->uuid} -u {$db->db_user} -p'{$db->db_password}' {$db->db_name} > {$backupPath}\"";
             } else {
                 // Approche Sidecar pour Postgres
                 $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
-                           "-e PGPASSWORD='{$db->postgres_password}' " .
+                           "-e PGPASSWORD='{$db->db_password}' " .
                            "postgres:16 " .
-                           "pg_dump -h {$db->uuid} -U {$db->postgres_user} {$db->postgres_db} > {$backupPath}\"";
+                           "pg_dump -h {$db->uuid} -U {$db->db_user} {$db->db_name} > {$backupPath}\"";
             }
             
             Log::info("Running backup command: {$dumpCmd}");
@@ -351,14 +349,14 @@ class BackupService
         $db = $backup->database;
         if (!$db) throw new \Exception("Base de données associée introuvable.");
 
-        $isMysql = str_contains(strtolower($db->image), 'mysql') || str_contains(strtolower($db->image), 'mariadb');
+        $type = $db->type;
 
-        if ($isMysql) {
+        if ($type === 'mysql' || $type === 'mariadb') {
              // Commande MySQL sécurisée (2>/dev/null pour cacher le warning de mot de passe)
-             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} mysql --user={$db->postgres_user} --password='{$db->postgres_password}' {$db->postgres_db} 2>/dev/null";
+             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} mysql --user={$db->db_user} --password='{$db->db_password}' {$db->db_name} 2>/dev/null";
         } else {
              // Commande Postgres
-             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} psql -U {$db->postgres_user} {$db->postgres_db}";
+             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} psql -U {$db->db_user} {$db->db_name}";
         }
 
         Log::info("Exécution de la commande de restauration DB: {$restoreCmd}");

@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Application;
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Services\Deployment\BackupService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -42,7 +42,7 @@ class CreateBackupJob implements ShouldQueue
         $app = Application::findOrFail($this->applicationId);
         
         if ($this->databaseId) {
-            $db = StandalonePostgresql::findOrFail($this->databaseId);
+            $db = StandaloneDatabase::findOrFail($this->databaseId);
             $backupService->createDatabaseBackup($app, $db, $this->backupId);
         } elseif ($this->volumeId) {
             $volume = \App\Models\LocalPersistentVolume::findOrFail($this->volumeId);

@@ -61,7 +61,7 @@ class Application extends Model
 
     public function databases(): HasMany
     {
-        return $this->hasMany(StandalonePostgresql::class);
+        return $this->hasMany(StandaloneDatabase::class);
     }
 
     public function persistentVolumes(): \Illuminate\Database\Eloquent\Relations\MorphMany

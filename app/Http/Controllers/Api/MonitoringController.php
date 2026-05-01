@@ -39,7 +39,7 @@ class MonitoringController extends Controller
 
         $resource = ($type === 'applications') 
             ? \App\Models\Application::findOrFail($id)
-            : \App\Models\StandalonePostgresql::findOrFail($id);
+            : \App\Models\StandaloneDatabase::findOrFail($id);
 
         if ($resource->server->user_id !== auth()->id()) {
             return response()->json(['error' => 'Unauthorized'], 403);

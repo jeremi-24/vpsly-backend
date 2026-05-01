@@ -41,7 +41,7 @@ class DeployApplicationJob implements \Illuminate\Contracts\Queue\ShouldQueue
 
     public function handle(\App\Services\Deployment\DeploymentOrchestrator $orchestrator): void
     {
-        $deployment = \App\Models\Deployment::with(['application.user', 'application.server'])->findOrFail($this->deploymentId);
+        $deployment = \App\Models\Deployment::with(['application.user', 'application.server', 'application.databases'])->findOrFail($this->deploymentId);
         
         // Anti-skip : on ne traite que les status 'pending' au démarrage (sécurité supplémentaire)
         if ($deployment->status !== \App\Enums\DeploymentStatus::PENDING->value && $this->attempts() === 1) {

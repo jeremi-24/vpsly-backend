@@ -15,7 +15,7 @@ class RuntimeLogService
      */
     protected function getContainerName($resource): string
     {
-        if ($resource instanceof \App\Models\StandalonePostgresql) {
+        if ($resource instanceof \App\Models\StandaloneDatabase) {
             return $resource->uuid;
         }
         

@@ -2,7 +2,7 @@
 
 namespace App\Services\Deployment;
 
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Models\Server;
 use Exception;
 use Illuminate\Support\Facades\Log;
@@ -17,7 +17,7 @@ class DatabaseProvisioner
     /**
      * Déploie ou met à jour une instance de base de données (Style Coolify).
      */
-    public function provision(StandalonePostgresql $database): void
+    public function provision(StandaloneDatabase $database): void
     {
         $server = $database->server;
         $containerName = $database->uuid;
@@ -67,44 +67,39 @@ class DatabaseProvisioner
     /**
      * Génère le YAML Docker Compose de manière générique.
      */
-    protected function generateCompose(StandalonePostgresql $database): string
+    protected function generateCompose(StandaloneDatabase $database): string
     {
         $volumeName = "db-data-{$database->uuid}";
-        $image = (string) $database->image;
-        
-        $isPostgres = str_contains($image, 'postgres');
-        $isMysql = str_contains($image, 'mysql') || str_contains($image, 'mariadb');
-        $isRedis = str_contains($image, 'redis');
+        $type = $database->type;
         
         $env = [];
         $internalPort = 5432;
         $mountPath = '/var/lib/postgresql/data';
 
-        if ($isPostgres) {
+        if ($type === 'postgres') {
             $env = [
-                "POSTGRES_USER={$database->postgres_user}",
-                "POSTGRES_PASSWORD={$database->postgres_password}",
-                "POSTGRES_DB={$database->postgres_db}",
+                "POSTGRES_USER={$database->db_user}",
+                "POSTGRES_PASSWORD={$database->db_password}",
+                "POSTGRES_DB={$database->db_name}",
             ];
             $internalPort = 5432;
             $mountPath = '/var/lib/postgresql/data';
-        } elseif ($isMysql) {
+        } elseif ($type === 'mysql' || $type === 'mariadb') {
             $env = [
-                "MYSQL_ROOT_PASSWORD={$database->postgres_password}",
-                "MYSQL_DATABASE={$database->postgres_db}",
+                "MYSQL_ROOT_PASSWORD={$database->db_password}",
+                "MYSQL_DATABASE={$database->db_name}",
             ];
 
-            // MYSQL_USER ne peut pas être 'root' dans l'image officielle MySQL
-            if ($database->postgres_user !== 'root') {
-                $env[] = "MYSQL_USER={$database->postgres_user}";
-                $env[] = "MYSQL_PASSWORD={$database->postgres_password}";
+            if ($database->db_user !== 'root') {
+                $env[] = "MYSQL_USER={$database->db_user}";
+                $env[] = "MYSQL_PASSWORD={$database->db_password}";
             }
 
             $internalPort = 3306;
             $mountPath = '/var/lib/mysql';
-        } elseif ($isRedis) {
+        } elseif ($type === 'redis') {
             $env = [
-                "REDIS_PASSWORD={$database->postgres_password}",
+                "REDIS_PASSWORD={$database->db_password}",
             ];
             $internalPort = 6379;
             $mountPath = '/data';
@@ -131,6 +126,25 @@ class DatabaseProvisioner
             $yml .= "      - \"{$database->public_port}:{$internalPort}\"\n";
         }
 
+        // Adminer (Interface de gestion)
+        if ($database->has_adminer) {
+            $adminerName = "adminer-{$database->uuid}";
+            $yml .= "  adminer:\n";
+            $yml .= "    image: \"adminer:latest\"\n";
+            $yml .= "    container_name: \"{$adminerName}\"\n";
+            $yml .= "    restart: always\n";
+            $yml .= "    environment:\n";
+            $yml .= "      - ADMINER_DEFAULT_SERVER={$database->uuid}\n";
+            $yml .= "    networks:\n";
+            $yml .= "      - vpsly\n";
+            $yml .= "    labels:\n";
+            $yml .= "      - \"traefik.enable=true\"\n";
+            $serverIp = $database->server->ip;
+            $yml .= "      - \"traefik.http.routers.{$adminerName}.rule=Host(`adminer-{$database->uuid}.{$serverIp}.sslip.io`)\"\n";
+            $yml .= "      - \"traefik.http.routers.{$adminerName}.entrypoints=web\"\n";
+            $yml .= "      - \"traefik.http.services.{$adminerName}.loadbalancer.server.port=8080\"\n";
+        }
+
         $memoryLimit = ($database->limits_memory && $database->limits_memory !== '0') ? $database->limits_memory : '512MB';
         $cpuLimit = ($database->limits_cpus && $database->limits_cpus !== '0') ? $database->limits_cpus : '0.5';
 
@@ -144,7 +158,6 @@ class DatabaseProvisioner
         $yml .= "  vpsly:\n";
         $yml .= "    external: true\n";
         $yml .= "    name: vpsly\n";
-
 
         $yml .= "volumes:\n";
         $yml .= "  {$volumeName}:\n";

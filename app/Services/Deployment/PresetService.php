@@ -3,7 +3,7 @@
 namespace App\Services\Deployment;
 
 use App\Models\Application;
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use Illuminate\Support\Str;
 
 
@@ -43,17 +43,17 @@ class PresetService
     /**
      * Injecte les variables de base de données dans l'application.
      */
-    public function linkDatabase(Application $app, StandalonePostgresql $db, string $preset): void
+    public function linkDatabase(Application $app, StandaloneDatabase $db, string $preset): void
     {
-        $dbType = str_contains(strtolower($db->image), 'mysql') ? 'mysql' : 'postgres';
-        $prefix = ($preset === 'laravel' && $dbType === 'postgres') ? 'DB_CONNECTION=pgsql' : "DB_CONNECTION={$dbType}";
-
+        $type = $db->type;
+        $dbType = ($type === 'mysql' || $type === 'mariadb') ? 'mysql' : 'postgres';
+        
         $vars = [
             'DB_HOST' => $db->uuid, // On utilise l'UUID comme hostname Docker
             'DB_PORT' => $dbType === 'mysql' ? '3306' : '5432',
-            'DB_DATABASE' => $db->postgres_db,
-            'DB_USERNAME' => $db->postgres_user,
-            'DB_PASSWORD' => $db->postgres_password,
+            'DB_DATABASE' => $db->db_name,
+            'DB_USERNAME' => $db->db_user,
+            'DB_PASSWORD' => $db->db_password,
         ];
 
         if ($preset === 'laravel') {

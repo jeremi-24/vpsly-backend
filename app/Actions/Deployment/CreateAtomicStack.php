@@ -3,7 +3,7 @@
 namespace App\Actions\Deployment;
 
 use App\Models\Application;
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Models\Server;
 use App\Services\GitHubService;
 use App\Services\Deployment\PresetService;
@@ -76,21 +76,26 @@ class CreateAtomicStack
             $dbName = Str::slug($app->name) . '_db';
             $dbUser = 'vpsly_user_' . Str::random(4);
             $dbPass = Str::random(16);
+            $dbType = $presetConfig['database'] === 'mysql' ? 'mysql' : 'postgres';
 
-            $db = StandalonePostgresql::create([
+            $db = StandaloneDatabase::create([
                 'name' => "DB for {$app->name}",
                 'uuid' => (string) Str::uuid(),
+                'type' => $dbType,
                 'server_id' => $server->id,
                 'application_id' => $app->id,
-                'image' => $presetConfig['database'] === 'mysql' ? 'mysql:8' : 'postgres:15',
-                'postgres_db' => $dbName,
-                'postgres_user' => $dbUser,
-                'postgres_password' => $dbPass,
+                'image' => $dbType === 'mysql' ? 'mysql:8' : 'postgres:15',
+                'db_name' => $dbName,
+                'db_user' => $dbUser,
+                'db_password' => $dbPass,
                 'status' => 'preparing',
             ]);
             
             // Injection automatique des ENV de connexion
             $this->presets->linkDatabase($app, $db, $preset);
+
+            // CRITIQUE : Lancer physiquement le déploiement de la base sur le serveur !
+            \App\Jobs\DeployDatabaseJob::dispatch($db);
         }
 
         // 4. Création du déploiement initial

@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Models\Server;
 use App\Services\Deployment\DatabaseProvisioner;
 use App\Jobs\DeployDatabaseJob;
@@ -14,13 +14,12 @@ class DatabaseController extends Controller
 {
     public function index(Request $request)
     {
-        return StandalonePostgresql::with('server')
+        return StandaloneDatabase::with('server')
             ->whereHas('server', function ($query) {
                 $query->where('user_id', auth()->id());
             })
             ->latest()
-            ->get()
-            ->each->append(['internal_db_url', 'external_db_url']);
+            ->get();
     }
 
     public function store(Request $request)
@@ -28,35 +27,45 @@ class DatabaseController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'server_id' => 'required|exists:servers,id',
+            'type' => 'required|string|in:postgres,mysql,mariadb,redis',
             'image' => 'nullable|string',
-            'postgres_user' => 'nullable|string',
-            'postgres_password' => 'nullable|string',
-            'postgres_db' => 'nullable|string',
+            'db_user' => 'nullable|string',
+            'db_password' => 'nullable|string',
+            'db_name' => 'nullable|string',
+            'has_adminer' => 'nullable|boolean',
         ]);
 
         // Vérifier que le serveur appartient bien à l'utilisateur
         $server = Server::where('user_id', auth()->id())->findOrFail($validated['server_id']);
 
-        $database = StandalonePostgresql::create([
+        $defaultImages = [
+            'postgres' => 'postgres:15-alpine',
+            'mysql' => 'mysql:8.0',
+            'mariadb' => 'mariadb:10.11',
+            'redis' => 'redis:7-alpine',
+        ];
+
+        $database = StandaloneDatabase::create([
             'uuid' => (string) Str::uuid(),
+            'type' => $validated['type'],
             'name' => $validated['name'],
             'server_id' => $server->id,
-            'image' => $validated['image'] ?? 'postgres:15-alpine',
-            'postgres_user' => $validated['postgres_user'] ?? 'postgres',
-            'postgres_password' => $validated['postgres_password'] ?? Str::random(16),
-            'postgres_db' => $validated['postgres_db'] ?? 'postgres',
+            'image' => $validated['image'] ?? ($defaultImages[$validated['type']] ?? 'postgres:15-alpine'),
+            'db_user' => $validated['db_user'] ?? ($validated['type'] === 'redis' ? null : 'vpsly'),
+            'db_password' => $validated['db_password'] ?? Str::random(16),
+            'db_name' => $validated['db_name'] ?? ($validated['type'] === 'redis' ? null : 'vpsly'),
+            'has_adminer' => $validated['has_adminer'] ?? false,
             'status' => 'creating',
         ]);
 
         return response()->json($database, 201);
     }
 
-    public function show(StandalonePostgresql $database)
+    public function show(StandaloneDatabase $database)
     {
         $this->authorizeOwner($database);
 
-        return $database->load(['server', 'persistentStorages'])
-            ->append(['internal_db_url', 'external_db_url']);
+        return $database->load(['server', 'persistentStorages']);
     }
 
     /**
@@ -64,7 +73,7 @@ class DatabaseController extends Controller
      */
     public function deploy($id)
     {
-        $database = StandalonePostgresql::findOrFail($id);
+        $database = StandaloneDatabase::findOrFail($id);
         $this->authorizeOwner($database);
         
         // Mise à jour de l'état avant le dispatch
@@ -81,7 +90,7 @@ class DatabaseController extends Controller
     /**
      * Bascule l'accès public de la base de données.
      */
-    public function togglePublic(StandalonePostgresql $database)
+    public function togglePublic(StandaloneDatabase $database)
     {
         $this->authorizeOwner($database);
 
@@ -89,7 +98,7 @@ class DatabaseController extends Controller
         
         if ($database->is_public && !$database->public_port) {
             // Assignation d'un port public si activé
-            $lastPort = StandalonePostgresql::where('server_id', $database->server_id)
+            $lastPort = StandaloneDatabase::where('server_id', $database->server_id)
                 ->whereNotNull('public_port')
                 ->max('public_port');
                 
@@ -103,7 +112,7 @@ class DatabaseController extends Controller
     }
     public function verifyIntegrity($id, \App\Services\Deployment\SSHService $ssh)
     {
-        $database = StandalonePostgresql::findOrFail($id);
+        $database = StandaloneDatabase::findOrFail($id);
         $this->authorizeOwner($database);
         $volumeName = "db-data-{$database->uuid}";
         
@@ -127,7 +136,7 @@ class DatabaseController extends Controller
             ], 500);
         }
     }
-    public function link(Request $request, StandalonePostgresql $database)
+    public function link(Request $request, StandaloneDatabase $database)
     {
         $this->authorizeOwner($database);
 
@@ -158,7 +167,7 @@ class DatabaseController extends Controller
     /**
      * Supprime l'instance de base de données.
      */
-    public function destroy(StandalonePostgresql $database)
+    public function destroy(StandaloneDatabase $database)
     {
         $this->authorizeOwner($database);
 
@@ -179,7 +188,47 @@ class DatabaseController extends Controller
     /**
      * Dissocie la base de données de son application.
      */
-    public function unlink(StandalonePostgresql $database)
+    public function stop(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
+    {
+        $this->authorizeOwner($database);
+
+        try {
+            $ssh->connect($database->server);
+            $ssh->exec("docker stop {$database->uuid}");
+            $ssh->disconnect();
+
+            $database->update(['status' => 'exited']);
+
+            return response()->json([
+                'message' => 'Instance arrêtée',
+                'database' => $database
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Erreur lors de l\'arrêt: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function start(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
+    {
+        $this->authorizeOwner($database);
+
+        try {
+            $ssh->connect($database->server);
+            $ssh->exec("docker start {$database->uuid}");
+            $ssh->disconnect();
+
+            $database->update(['status' => 'running']);
+
+            return response()->json([
+                'message' => 'Instance démarrée',
+                'database' => $database
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Erreur lors du démarrage: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function unlink(StandaloneDatabase $database)
     {
         $this->authorizeOwner($database);
 
@@ -208,7 +257,7 @@ class DatabaseController extends Controller
     /**
      * Vérifie que l'utilisateur est bien le propriétaire du serveur qui héberge la base.
      */
-    protected function authorizeOwner(StandalonePostgresql $database)
+    protected function authorizeOwner(StandaloneDatabase $database)
     {
         if ($database->server->user_id !== auth()->id()) {
             abort(403, 'Accès non autorisé à cette base de données.');

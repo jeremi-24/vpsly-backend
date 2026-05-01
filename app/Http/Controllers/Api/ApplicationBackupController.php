@@ -24,7 +24,7 @@ class ApplicationBackupController extends Controller
     {
         $application = Application::where('user_id', auth()->id())->findOrFail($appId);
         $request->validate([
-            'database_id' => 'nullable|exists:standalone_postgresqls,id',
+            'database_id' => 'nullable|exists:standalone_databases,id',
             'volume_id' => 'nullable|exists:local_persistent_volumes,id',
         ]);
 

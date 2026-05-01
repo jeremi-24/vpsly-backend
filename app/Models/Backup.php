@@ -24,6 +24,6 @@ class Backup extends Model
 
     public function database(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
-        return $this->belongsTo(StandalonePostgresql::class, 'database_id');
+        return $this->belongsTo(StandaloneDatabase::class, 'database_id');
     }
 }

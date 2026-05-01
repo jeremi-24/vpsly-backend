@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Application;
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Models\Server;
 use App\Models\Deployment;
 use App\Services\MonitoringService;
@@ -24,7 +24,7 @@ class DashboardController extends Controller
             $q->where('user_id', $user->id);
         })->count();
 
-        $dbCount = StandalonePostgresql::whereHas('server', function($q) use ($user) {
+        $dbCount = StandaloneDatabase::whereHas('server', function($q) use ($user) {
             $q->where('user_id', $user->id);
         })->count();
 

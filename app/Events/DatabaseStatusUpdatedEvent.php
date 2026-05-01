@@ -2,7 +2,7 @@
 
 namespace App\Events;
 
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
@@ -14,7 +14,7 @@ class DatabaseStatusUpdatedEvent implements ShouldBroadcastNow
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
-        public StandalonePostgresql $database
+        public StandaloneDatabase $database
     ) {}
 
     public function broadcastOn(): array

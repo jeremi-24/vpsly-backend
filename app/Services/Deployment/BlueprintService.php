@@ -64,15 +64,14 @@ class BlueprintService
         $dbTypesFound = [];
         
         foreach ($databases as $db) {
-            $type = str_contains(strtolower($db->image), 'mysql') ? 'mysql' : 
-                   (str_contains(strtolower($db->image), 'redis') ? 'redis' : 'postgres');
+            $type = $db->type;
 
             $dbTypesFound[$type] = ($dbTypesFound[$type] ?? 0) + 1;
             
             // Si sur le même serveur, on utilise l'alias Docker, sinon l'IP
             $isSameServer = $db->server_id === $app->server_id;
             $host = $isSameServer ? $db->uuid : $db->server->ip;
-            $port = $type === 'mysql' ? '3306' : ($type === 'redis' ? '6379' : '5432');
+            $port = ($type === 'mysql' || $type === 'mariadb') ? '3306' : ($type === 'redis' ? '6379' : '5432');
             
             $isSecondary = $dbTypesFound[$type] > 1;
             $slugName = strtoupper(preg_replace('/[^a-z0-9]/i', '_', $db->name));
@@ -81,9 +80,9 @@ class BlueprintService
             if ($type === 'redis') {
                 $envVars["{$prefix}REDIS_HOST"] = $host;
                 $envVars["{$prefix}REDIS_PORT"] = $port;
-                if ($db->postgres_password) {
-                    $envVars["{$prefix}REDIS_PASSWORD"] = $db->postgres_password;
-                    $envVars["{$prefix}REDIS_URL"] = "redis://:{$db->postgres_password}@{$host}:{$port}";
+                if ($db->db_password) {
+                    $envVars["{$prefix}REDIS_PASSWORD"] = $db->db_password;
+                    $envVars["{$prefix}REDIS_URL"] = "redis://:{$db->db_password}@{$host}:{$port}";
                 } else {
                     $envVars["{$prefix}REDIS_URL"] = "redis://{$host}:{$port}";
                 }
@@ -94,12 +93,12 @@ class BlueprintService
                 $envVars["{$prefix}DB_CONNECTION"] = $laravelType;
                 $envVars["{$prefix}DB_HOST"] = $host;
                 $envVars["{$prefix}DB_PORT"] = $port;
-                $envVars["{$prefix}DB_DATABASE"] = $db->postgres_db;
-                $envVars["{$prefix}DB_USERNAME"] = $db->postgres_user;
-                $envVars["{$prefix}DB_PASSWORD"] = $db->postgres_password;
+                $envVars["{$prefix}DB_DATABASE"] = $db->db_name;
+                $envVars["{$prefix}DB_USERNAME"] = $db->db_user;
+                $envVars["{$prefix}DB_PASSWORD"] = $db->db_password;
                 
-                $auth = "{$db->postgres_user}:{$db->postgres_password}";
-                $envVars["{$prefix}DATABASE_URL"] = "{$type}://{$auth}@{$host}:{$port}/{$db->postgres_db}";
+                $auth = "{$db->db_user}:{$db->db_password}";
+                $envVars["{$prefix}DATABASE_URL"] = "{$type}://{$auth}@{$host}:{$port}/{$db->db_name}";
             }
         }
 
@@ -143,7 +142,8 @@ class BlueprintService
                 'labels' => [
                     "traefik.enable=true",
                     "traefik.http.routers.{$appSlug}.rule=Host(`{$domain}`)",
-                    "traefik.http.routers.{$appSlug}.entrypoints=web",
+                    "traefik.http.routers.{$appSlug}.entrypoints=web,websecure",
+                    "traefik.http.routers.{$appSlug}.tls=true",
                     "traefik.http.services.{$appSlug}.loadbalancer.server.port={$containerPort}",
                 ],
                 'healthcheck' => [
@@ -166,48 +166,8 @@ class BlueprintService
             ]
         ];
 
-        // LOGIQUE COMBO : Injection de la base de données liée (si sur le même serveur)
-        $database = $app->databases()->where('server_id', $app->server_id)->first();
-        if ($database) {
-            $dbSlug = $database->uuid;
-            $dbType = str_contains(strtolower($database->image), 'mysql') ? 'mysql' : 'postgres';
-            $internalPort = $dbType === 'mysql' ? 3306 : 5432;
-
-            $services[$dbSlug] = [
-                'container_name' => $dbSlug,
-                'image' => $database->image ?: ($dbType === 'mysql' ? 'mysql:8' : 'postgres:15'),
-                'restart' => 'always',
-                'networks' => ['vpsly'],
-                'command' => $dbType === 'mysql' ? [
-                    '--performance_schema=OFF',
-                    '--innodb_buffer_pool_size=64M',
-                    '--innodb_log_buffer_size=1M',
-                ] : null,
-                'environment' => [
-                    ($dbType === 'mysql' ? 'MYSQL_DATABASE' : 'POSTGRES_DB') => $database->postgres_db,
-                    ($dbType === 'mysql' ? 'MYSQL_USER' : 'POSTGRES_USER') => $database->postgres_user,
-                    ($dbType === 'mysql' ? 'MYSQL_PASSWORD' : 'POSTGRES_PASSWORD') => $database->postgres_password,
-                    ($dbType === 'mysql' ? 'MYSQL_ROOT_PASSWORD' : null) => $database->postgres_password,
-                ],
-                'volumes' => [
-                    "{$dbSlug}_data:" . ($dbType === 'mysql' ? '/var/lib/mysql' : '/var/lib/postgresql/data')
-                ],
-                'healthcheck' => [
-                    'test' => $dbType === 'mysql' 
-                        ? ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-                        : ["CMD-SHELL", "pg_isready -U {$database->postgres_user} -d {$database->postgres_db}"],
-                    'interval' => '10s', // Augmenté pour laisser respirer le CPU
-                    'timeout' => '5s',
-                    'retries' => 10, // Plus de tentatives pour les VPS lents
-                    'start_period' => '30s'
-                ]
-            ];
-
-            // On fait dépendre l'app de la DB
-            $services[$appSlug]['depends_on'] = [
-                $dbSlug => ['condition' => 'service_healthy']
-            ];
-        }
+        // Les bases de données sont gérées de manière indépendante (Standalone)
+        // L'application s'y connecte via le réseau Docker 'vpsly' en utilisant l'UUID comme Host.
 
         // Intégration des volumes persistants pour l'App
         $volumes = $app->persistentVolumes()->get();
@@ -229,10 +189,6 @@ class BlueprintService
                 ]
             ]
         ];
-
-        if ($database) {
-            $compose['volumes']["{$database->uuid}_data"] = ['driver' => 'local'];
-        }
 
         // Déclaration des volumes nommés de l'application
         foreach ($volumes as $vol) {

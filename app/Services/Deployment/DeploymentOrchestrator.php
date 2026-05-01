@@ -159,7 +159,28 @@ class DeploymentOrchestrator
                         throw new \App\Exceptions\Deployment\NonRetryableException("Le container {$appSlug} n'a pas démarré à temps (Status: {$status}).");
                     }
 
-                    $this->streamer->log($deployment, "Container is running. Starting migrations...", LogType::INFO);
+                    $this->streamer->log($deployment, "Container is running. Checking linked databases...", LogType::INFO);
+
+                    // ATTENTE DES DB LIÉES (Fix DNS Race Condition)
+                    foreach ($app->databases as $linkedDb) {
+                        $this->streamer->log($deployment, "Waiting for database {$linkedDb->name} to be ready...", LogType::DEBUG);
+                        $dbWait = 0;
+                        $dbReady = false;
+                        while ($dbWait < 30) {
+                            $dbStatus = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$linkedDb->uuid} 2>/dev/null || echo 'missing'"));
+                            if ($dbStatus === 'running') {
+                                $dbReady = true;
+                                break;
+                            }
+                            sleep(2);
+                            $dbWait += 2;
+                        }
+                        if (!$dbReady) {
+                            throw new \App\Exceptions\Deployment\NonRetryableException("La base de données liée {$linkedDb->name} n'est pas prête.");
+                        }
+                    }
+
+                    $this->streamer->log($deployment, "Databases are ready. Starting migrations...", LogType::INFO);
                     $this->ssh->stream("docker exec {$appSlug} php artisan migrate --force", function ($line) use ($deployment) {
                         $this->streamer->log($deployment, $line, LogType::DEBUG);
                     });

@@ -118,6 +118,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{database}', [DatabaseController::class, 'show']);
         Route::delete('/{database}', [DatabaseController::class, 'destroy']);
         Route::post('/{database}/deploy', [DatabaseController::class, 'deploy']);
+        Route::post('/{database}/stop', [DatabaseController::class, 'stop']);
+        Route::post('/{database}/start', [DatabaseController::class, 'start']);
         Route::post('/{database}/verify', [DatabaseController::class, 'verifyIntegrity']);
         Route::patch('/{database}/toggle-public', [DatabaseController::class, 'togglePublic']);
         Route::post('/{database}/link', [DatabaseController::class, 'link']);

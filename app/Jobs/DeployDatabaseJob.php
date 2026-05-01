@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Events\DatabaseStatusUpdatedEvent;
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Services\Deployment\DatabaseProvisioner;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,7 +20,7 @@ class DeployDatabaseJob implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        protected StandalonePostgresql $database
+        protected StandaloneDatabase $database
     ) {}
 
     /**

@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Models\StandalonePostgresql;
+use App\Models\StandaloneDatabase;
 use App\Services\Deployment\RuntimeLogService;
 use App\Services\Deployment\SSHService;
 use Illuminate\Bus\Queueable;
@@ -42,7 +42,7 @@ class StreamDatabaseLogsJob implements ShouldQueue, ShouldBeUnique
      */
     public function handle(SSHService $ssh, RuntimeLogService $logService): void
     {
-        $database = StandalonePostgresql::find($this->databaseId);
+        $database = StandaloneDatabase::find($this->databaseId);
 
         if (!$database || !$database->server) {
             Log::error("[StreamDatabaseLogs] Database or server not found", ['id' => $this->databaseId]);
