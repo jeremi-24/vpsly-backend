@@ -72,9 +72,19 @@ class ServerController extends Controller
             $this->sshService->connect($server);
             $server->update(['status' => 'connected']);
             
+            // Installation automatique de l'agent de monitoring en arrière-plan
+            // On utilise un Job ou on lance la commande de manière asynchrone pour ne pas bloquer l'UI
+            try {
+                \Illuminate\Support\Facades\Artisan::queue('vpsly:agent-install', [
+                    'server_id' => $server->id
+                ]);
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning("Échec du lancement de l'installation de l'agent pour le serveur {$server->id}: " . $e->getMessage());
+            }
+
             return response()->json([
                 'status' => 'connected',
-                'message' => 'SSH connection successful!'
+                'message' => 'SSH connection successful! Agent installation started in background.'
             ]);
         } catch (\Exception $e) {
             $server->update(['status' => 'failed']);

@@ -56,6 +56,7 @@ class MonitoringController extends Controller
             'system' => [
                 'cpu_usage' => $stats['cpu_usage'] ?? 0,
                 'mem_percent' => $stats['mem_percent'] ?? 0,
+                'disk_percent' => $stats['disk_percent'] ?? 0,
             ],
             'container' => $containerStats
         ]);

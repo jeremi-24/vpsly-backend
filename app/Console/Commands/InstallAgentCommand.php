@@ -21,12 +21,20 @@ class InstallAgentCommand extends Command
         try {
             $ssh->connect($server);
 
-            // 1. Vérification / Installation de Go
+            // 1. Vérification si déjà installé
+            $this->comment("Vérification de l'agent existant...");
+            $currentAgent = trim($ssh->exec("vpsly-agent stats", false));
+            if (str_contains($currentAgent, 'cpu_usage')) {
+                $this->info("L'agent est déjà installé et fonctionnel. Passage à l'étape suivante.");
+                return;
+            }
+
+            // 2. Vérification / Installation de Go
             $this->comment("Vérification de Go...");
             $goPath = trim($ssh->exec("which go", false));
             if (empty($goPath)) {
-                $this->warn("Go n'est pas installé. Installation en cours...");
-                $ssh->exec("apt update && apt install -y golang");
+                $this->warn("Go n'est pas installé. Installation en cours (peut prendre 1-2 min)...");
+                $ssh->exec("apt update && apt install -y golang-go"); // golang-go est plus standard sur Ubuntu
             }
 
             // 2. Nettoyage et Préparation
