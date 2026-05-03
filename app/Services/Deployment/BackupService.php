@@ -58,19 +58,32 @@ class BackupService
             $type = $db->type;
             
             if ($type === 'mysql' || $type === 'mariadb') {
-                // Approche Sidecar pour MySQL
+                // Approche Sidecar pour MySQL - Utilisation de MYSQL_PWD pour cacher le mot de passe de 'ps aux'
+                $dbUser = escapeshellarg($db->db_user);
+                $dbName = escapeshellarg($db->db_name);
+                $dbHost = escapeshellarg($db->uuid);
+                $dbPass = $db->db_password; // On ne l'escape pas ici car injecté dans l'env du container
+                
                 $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
+                           "-e MYSQL_PWD='{$dbPass}' " .
                            "mysql:8.4 " .
-                           "mysqldump --no-tablespaces -h {$db->uuid} -u {$db->db_user} -p'{$db->db_password}' {$db->db_name} > {$backupPath}\"";
+                           "mysqldump --no-tablespaces -h {$dbHost} -u {$dbUser} {$dbName} > {$backupPath}\"";
             } else {
                 // Approche Sidecar pour Postgres
+                $dbUser = escapeshellarg($db->db_user);
+                $dbName = escapeshellarg($db->db_name);
+                $dbHost = escapeshellarg($db->uuid);
+                $dbPass = $db->db_password;
+
                 $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
-                           "-e PGPASSWORD='{$db->db_password}' " .
+                           "-e PGPASSWORD='{$dbPass}' " .
                            "postgres:16 " .
-                           "pg_dump -h {$db->uuid} -U {$db->db_user} {$db->db_name} > {$backupPath}\"";
+                           "pg_dump -h {$dbHost} -U {$dbUser} {$dbName} > {$backupPath}\"";
             }
             
-            Log::info("Running backup command: {$dumpCmd}");
+            // Masquer le mot de passe dans les logs
+            $maskedCmd = preg_replace('/(PASSWORD|MYSQL_PWD)=[\'"].*?[\'"]/', '$1=\'********\'', $dumpCmd);
+            Log::info("Running backup command: {$maskedCmd}");
             $this->ssh->exec($dumpCmd);
 
             // Compresser le backup
@@ -353,14 +366,22 @@ class BackupService
         $type = $db->type;
 
         if ($type === 'mysql' || $type === 'mariadb') {
-             // Commande MySQL sécurisée (2>/dev/null pour cacher le warning de mot de passe)
-             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} mysql --user={$db->db_user} --password='{$db->db_password}' {$db->db_name} 2>/dev/null";
+             // Commande MySQL sécurisée via variable d'env pour cacher le mot de passe
+             $dbUser = escapeshellarg($db->db_user);
+             $dbName = escapeshellarg($db->db_name);
+             $dbPass = $db->db_password;
+             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i -e MYSQL_PWD='{$dbPass}' {$db->uuid} mysql --user={$dbUser} {$dbName} 2>/dev/null";
         } else {
              // Commande Postgres
-             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i {$db->uuid} psql -U {$db->db_user} {$db->db_name}";
+             $dbUser = escapeshellarg($db->db_user);
+             $dbName = escapeshellarg($db->db_name);
+             $dbPass = $db->db_password;
+             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i -e PGPASSWORD='{$dbPass}' {$db->uuid} psql -U {$dbUser} {$dbName}";
         }
 
-        Log::info("Exécution de la commande de restauration DB: {$restoreCmd}");
+        // Masquer le mot de passe dans les logs
+        $maskedCmd = preg_replace('/(PASSWORD|MYSQL_PWD)=[\'"].*?[\'"]/', '$1=\'********\'', $restoreCmd);
+        Log::info("Exécution de la commande de restauration DB: {$maskedCmd}");
         $this->ssh->exec($restoreCmd);
     }
 

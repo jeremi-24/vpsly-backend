@@ -35,9 +35,11 @@ class ServerController extends Controller
     {
         $data = $request->validate([
             'name' => 'required|string|max:255',
-            'ip' => 'required|ip',
+            'ip' => 'required|ip|unique:servers,ip',
             'ssh_user' => 'required|string|alpha_dash',
             'ssh_port' => 'required|integer|min:1|max:65535',
+        ], [
+            'ip.unique' => 'Ce serveur (IP) est déjà enregistré sur VPSly.'
         ]);
 
         $keys = $keyService->generateKeyPair();
