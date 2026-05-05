@@ -37,7 +37,7 @@ class BlueprintService
         $isPhp = $this->isPhp($nixpacksPlan);
         
         $serverIp = $app->server->ip ?? '127.0.0.1';
-        $domain = "{$appSlug}.{$serverIp}.sslip.io";
+        $domain = $app->domain ?: "{$appSlug}.{$serverIp}.sslip.io";
 
         $envVars = [
             'APP_NAME' => $appSlug,
@@ -126,7 +126,7 @@ class BlueprintService
         $containerPort = $isPhp ? 80 : 3000;
         
         $serverIp = $app->server->ip ?? '127.0.0.1';
-        $domain = "{$appSlug}.{$serverIp}.sslip.io";
+        $domain = $app->domain ?: "{$appSlug}.{$serverIp}.sslip.io";
 
         // Limites de ressources (Ajustées pour petit VPS)
         $cpuLimit = "0.5";
@@ -144,6 +144,7 @@ class BlueprintService
                     "traefik.http.routers.{$appSlug}.rule=Host(`{$domain}`)",
                     "traefik.http.routers.{$appSlug}.entrypoints=web,websecure",
                     "traefik.http.routers.{$appSlug}.tls=true",
+                    "traefik.http.routers.{$appSlug}.tls.certresolver=vpsly",
                     "traefik.http.services.{$appSlug}.loadbalancer.server.port={$containerPort}",
                 ],
                 'healthcheck' => [

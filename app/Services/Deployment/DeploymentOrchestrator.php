@@ -269,7 +269,7 @@ class DeploymentOrchestrator
     {
         $appSlug = $this->blueprint->getSlug($app);
         $serverIp = $app->server->ip ?? '127.0.0.1';
-        $domain = "{$appSlug}.{$serverIp}.sslip.io";
+        $domain = $app->domain ?: "{$appSlug}.{$serverIp}.sslip.io";
 
         $this->streamer->log($deployment, " Verifying application health (Target: https://{$domain})", LogType::INFO);
 
@@ -409,6 +409,7 @@ class DeploymentOrchestrator
                 '--network vpsly',
                 '-p 80:80 -p 443:443',
                 '-v /var/run/docker.sock:/var/run/docker.sock:ro',
+                '-v /var/lib/vpsly/traefik/letsencrypt:/letsencrypt',
                 'traefik:v3.6',
                 '--api.insecure=true',
                 '--providers.docker=true',
@@ -417,7 +418,10 @@ class DeploymentOrchestrator
                 '--entrypoints.web.address=:80',
                 '--entrypoints.web.http.redirections.entryPoint.to=websecure',
                 '--entrypoints.web.http.redirections.entryPoint.scheme=https',
-                '--entrypoints.websecure.address=:443'
+                '--entrypoints.websecure.address=:443',
+                '--certificatesresolvers.vpsly.acme.tlschallenge=true',
+                '--certificatesresolvers.vpsly.acme.email=contact@vpsly.tech',
+                '--certificatesresolvers.vpsly.acme.storage=/letsencrypt/acme.json'
             ]);
             $this->ssh->exec($command);
         }
