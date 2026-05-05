@@ -47,7 +47,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Gestion des Serveurs
     Route::prefix('servers')->group(function () {
         Route::get('/', [ServerController::class, 'index']);
-        Route::post('/', [ServerController::class, 'store']);
+        Route::post('/', [ServerController::class, 'store'])->middleware('check_quota:max_servers');
         Route::get('/{server}', [ServerController::class, 'show']);
         Route::put('/{server}', [ServerController::class, 'update']);
         Route::delete('/{server}', [ServerController::class, 'destroy']);
@@ -59,7 +59,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('applications')->group(function () {
         // ... (routes applications)
         Route::get('/', [ApplicationController::class, 'index']);
-        Route::post('/', [ApplicationController::class, 'store']);
+        Route::post('/', [ApplicationController::class, 'store'])->middleware('check_quota:max_apps');
         Route::get('/{id}', [ApplicationController::class, 'show']);
         Route::put('/{id}', [ApplicationController::class, 'update']);
         Route::get('/{id}/deployments', [ApplicationController::class, 'deployments']);
@@ -125,7 +125,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Gestion des Bases de données
     Route::prefix('databases')->group(function () {
         Route::get('/', [DatabaseController::class, 'index']);
-        Route::post('/', [DatabaseController::class, 'store']);
+        Route::post('/', [DatabaseController::class, 'store'])->middleware('check_quota:max_databases');
         Route::get('/{database}', [DatabaseController::class, 'show']);
         Route::delete('/{database}', [DatabaseController::class, 'destroy']);
         Route::post('/{database}/deploy', [DatabaseController::class, 'deploy']);

@@ -39,7 +39,16 @@ class RunScheduledBackups extends Command
             $globalSettings = $user->backupSettings()->first();
             $override = ApplicationBackupOverride::where('application_id', $app->id)->first();
 
-            Log::info("Vérification App: {$app->name} (User: {$user->email})");
+            $team = $app->team;
+            if (!$team) continue;
+
+            Log::info("Vérification App: {$app->name} (Team: {$team->name})");
+
+            // Si le plan ne supporte pas les backups auto, on passe
+            if (!$team->hasFeature('auto_backups')) {
+                Log::info("  - Backup auto non supporté pour le plan {$team->plan}.");
+                continue;
+            }
 
             // Si désactivé au niveau app, on passe
             if ($override && !$override->is_enabled) {

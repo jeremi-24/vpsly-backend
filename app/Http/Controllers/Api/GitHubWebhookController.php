@@ -55,6 +55,13 @@ class GitHubWebhookController extends Controller
             }
 
             foreach ($applications as $app) {
+                // Vérification du plan (Auto-push réservé au plan PRO)
+                $team = $app->team;
+                if ($team && !$team->hasFeature('github_webhooks')) {
+                    Log::info("GitHub Webhook: Auto-push ignored for app {$app->name} (Plan {$team->plan} does not support it).");
+                    continue;
+                }
+
                 Log::info("GitHub Webhook: Triggering deployment for app {$app->name}");
                 
                 if (!$app->is_deploying) {

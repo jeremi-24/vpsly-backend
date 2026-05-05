@@ -126,5 +126,6 @@ return [
     'webhook_secret' => env('WEBHOOK_SECRET', 'vpsly_secret_key'),
 
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+    'mail_logo_url' => env('MAIL_LOGO_URL', 'https://www.vpsly.tech/assets/logo_white_bg.png'),
 
 ];

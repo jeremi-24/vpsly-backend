@@ -52,4 +52,11 @@ return [
         'token' => env('WHATSAPP_TOKEN'),
         'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
     ],
+
+    'geniuspay' => [
+        'merchant_id' => env('GENIUSPAY_MERCHANT_ID'),
+        'public_key' => env('GENIUSPAY_PUBLIC_KEY'),
+        'secret_key' => env('GENIUSPAY_SECRET_KEY'),
+        'base_url' => env('GENIUSPAY_BASE_URL', 'https://pay.genius.ci/api/v1/merchant'),
+    ],
 ];

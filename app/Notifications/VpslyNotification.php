@@ -58,7 +58,8 @@ class VpslyNotification extends Notification implements ShouldQueue
         $mail = (new MailMessage)
             ->subject("[VPSly] {$this->title}")
             ->greeting("Bonjour {$notifiable->name},")
-            ->line($this->message);
+            ->line(new \Illuminate\Support\HtmlString(preg_replace('/\*\*(.*?)\*\*/', '<b>$1</b>', $this->message)))
+            ->line('Consultez l\'état de votre infrastructure en temps réel sur votre tableau de bord.');
 
         if ($this->level === 'error') {
             $mail->error();
@@ -68,7 +69,8 @@ class VpslyNotification extends Notification implements ShouldQueue
             $mail->action('Accéder au Dashboard', $url);
         }
 
-        $mail->line('Merci d\'utiliser VPSly pour la gestion de votre infrastructure.');
+        $mail->line('Merci d\'utiliser **vpsly.tech** pour la gestion de votre infrastructure.')
+             ->salutation('L\'équipe VPSly');
 
         return $mail;
     }

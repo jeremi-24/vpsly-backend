@@ -34,6 +34,15 @@ class ApplicationController extends Controller
             'log_command' => 'nullable|string',
         ]);
         $user = auth()->user();
+        $team = $user->currentTeam;
+
+        // Vérification du domaine personnalisé
+        if ($request->domain && $team && !$team->hasFeature('custom_domains')) {
+            return response()->json([
+                'message' => 'Les domaines personnalisés sont réservés aux plans Solo et Pro.',
+                'errors' => ['domain' => ['Veuillez passer au plan Solo pour utiliser un domaine personnalisé.']]
+            ], 403);
+        }
 
         // Empêcher les doublons (même repo et même branche) - Uniquement pour Docker
         if ($request->deployment_mode === 'docker') {
@@ -88,6 +97,15 @@ class ApplicationController extends Controller
             'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
             'log_command' => 'nullable|string',
         ]);
+        $team = auth()->user()->currentTeam;
+
+        // Vérification du domaine personnalisé
+        if ($request->domain && $team && !$team->hasFeature('custom_domains')) {
+            return response()->json([
+                'message' => 'Les domaines personnalisés sont réservés aux plans Solo et Pro.',
+                'errors' => ['domain' => ['Veuillez passer au plan Solo pour utiliser un domaine personnalisé.']]
+            ], 403);
+        }
 
         $app->update([
             'name' => $request->name,

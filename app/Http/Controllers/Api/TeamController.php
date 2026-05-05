@@ -68,8 +68,26 @@ class TeamController extends Controller
 
         $team = Team::findOrFail($request->team_id);
 
-        if ($team->owner_id !== $request->user()->id) {
+        \Illuminate\Support\Facades\Log::info("Invitation Debug", [
+            'team_owner_id' => $team->owner_id,
+            'auth_user_id' => $request->user()->id,
+            'match' => $team->owner_id == $request->user()->id
+        ]);
+
+        if ($team->owner_id != $request->user()->id) {
             return response()->json(['message' => 'Seul le propriétaire peut inviter'], 403);
+        }
+
+        // Vérification du quota de membres
+        $limit = data_get($team->getPlanConfig(), 'max_team_members', 1);
+        $currentMembers = $team->members()->count();
+        
+        if ($limit !== -1 && $currentMembers >= $limit) {
+            $planName = $team->getPlanConfig()['name'] ?? 'actuel';
+            return response()->json([
+                'message' => "Vous avez atteint la limite de membres de votre plan {$planName} (Max: {$limit}).",
+                'quota_reached' => true
+            ], 403);
         }
 
         $invitation = TeamInvitation::create([

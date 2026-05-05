@@ -355,8 +355,8 @@ class DeploymentOrchestrator
             $level = $status === DeploymentStatus::SUCCESS ? 'success' : 'error';
             $title = $status === DeploymentStatus::SUCCESS ? 'Déploiement réussi' : 'Déploiement échoué';
             $message = $status === DeploymentStatus::SUCCESS
-                ? "L'application {$app->name} a été déployée avec succès."
-                : "Le déploiement de {$app->name} a échoué. Consultez les logs pour plus de détails.";
+                ? "L'application **{$app->name}** a été déployée avec succès."
+                : "Le déploiement de **{$app->name}** a échoué. Consultez les logs pour plus de détails.";
 
             $app->user->notify(new \App\Notifications\VpslyNotification(
                 $title,
