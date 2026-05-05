@@ -23,10 +23,24 @@ class TeamController extends Controller
 
         $user = $request->user();
 
+        // Anti-bypass : Un utilisateur ne peut posséder qu'un seul espace "Starter" au total.
+        // S'il possède déjà un espace en plan Starter, il doit l'upgrader avant d'en créer un autre.
+        $hasStarterTeam = Team::where('owner_id', $user->id)
+            ->where('plan', 'starter')
+            ->exists();
+        
+        if ($hasStarterTeam) {
+            return response()->json([
+                'message' => 'Vous possédez déjà un espace de travail sur le plan Starter. Veuillez passer à un plan Solo ou Pro sur cet espace avant d\'en créer un nouveau.',
+                'requires_upgrade' => true
+            ], 403);
+        }
+
         // 1. Création de l'équipe
         $team = Team::create([
             'name' => $validated['name'],
             'owner_id' => $user->id,
+            'plan' => 'starter',
         ]);
 
         // 2. Attacher l'utilisateur avec le rôle owner

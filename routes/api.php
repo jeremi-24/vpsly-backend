@@ -8,6 +8,9 @@ use App\Http\Controllers\DeploymentController;
 use App\Http\Controllers\Api\EnvironmentVariableController;
 use App\Http\Controllers\Api\ApplicationLogController;
 use App\Http\Controllers\Api\DatabaseController;
+use App\Http\Controllers\Api\PaymentWebhookController;
+use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\GitHubWebhookController;
 use Illuminate\Support\Facades\Broadcast;
 
 // Authentification Classique
@@ -16,12 +19,18 @@ Route::post('/login', [\App\Http\Controllers\Api\AuthController::class, 'login']
 
 // Si vous utilisez Sanctum avec Auth : Route::middleware('auth:sanctum')->get('/user', function () { ... });
 
+Route::post('/webhooks/geniuspay', [PaymentWebhookController::class, 'handle'])->name('api.webhooks.geniuspay');
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
-        return $request->user();
+        return $request->user()->load('currentTeam');
     });
     Route::put('/user', [\App\Http\Controllers\Api\UserController::class, 'update']);
     
+    // Payments
+    Route::post('/payments/checkout', [PaymentController::class, 'createSession']);
+    Route::get('/payments/history', [\App\Http\Controllers\Api\PaymentHistoryController::class, 'index']);
+
     // Teams
     Route::get('/teams', [\App\Http\Controllers\Api\TeamController::class, 'index']);
     Route::post('/teams', [\App\Http\Controllers\Api\TeamController::class, 'store']);

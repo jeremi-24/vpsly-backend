@@ -13,6 +13,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->validateCsrfTokens(except: [
+            'api/webhooks/*',
+        ]);
         $middleware->trustProxies(at: '*');
         $middleware->alias([
             'check_quota' => \App\Http\Middleware\CheckQuota::class,

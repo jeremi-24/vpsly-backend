@@ -14,7 +14,28 @@ class Team extends Model
         'name',
         'owner_id',
         'plan',
+        'subscription_status',
+        'last_payment_at',
+        'expires_at',
+        'payment_reference',
     ];
+
+    protected $appends = ['applications_count', 'servers_count', 'databases_count'];
+
+    public function getApplicationsCountAttribute()
+    {
+        return $this->applications()->count();
+    }
+
+    public function getServersCountAttribute()
+    {
+        return $this->servers()->count();
+    }
+
+    public function getDatabasesCountAttribute()
+    {
+        return $this->databases()->count();
+    }
 
     public function databases()
     {

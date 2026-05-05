@@ -57,6 +57,7 @@ return [
         'merchant_id' => env('GENIUSPAY_MERCHANT_ID'),
         'public_key' => env('GENIUSPAY_PUBLIC_KEY'),
         'secret_key' => env('GENIUSPAY_SECRET_KEY'),
+        'webhook_secret' => env('GENIUSPAY_WEBHOOK_SECRET'),
         'base_url' => env('GENIUSPAY_BASE_URL', 'https://pay.genius.ci/api/v1/merchant'),
     ],
 ];
