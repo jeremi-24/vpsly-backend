@@ -11,9 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('applications', function (Blueprint $table) {
-            $table->string('uuid')->unique()->after('id')->nullable();
-        });
+        if (!Schema::hasColumn('applications', 'uuid')) {
+            Schema::table('applications', function (Blueprint $table) {
+                $table->string('uuid')->unique()->after('id')->nullable();
+            });
+        }
     }
 
     /**

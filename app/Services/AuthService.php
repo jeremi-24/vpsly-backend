@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Models\Team;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class AuthService
 {
@@ -29,6 +31,9 @@ class AuthService
                 "{$provider}_token" => $socialUser->token,
                 'password' => bcrypt(str()->random(24)),
             ]);
+
+            // Création d'une équipe personnelle par défaut
+            $this->createPersonalTeam($user);
         }
 
         // Si l'utilisateur vient d'être créé, on envoie le mail de bienvenue
@@ -66,5 +71,23 @@ class AuthService
     {
         $frontendUrl = rtrim(env('FRONTEND_URL', 'http://localhost:5173'), '/');
         return "{$frontendUrl}/auth/callback?token={$token}";
+    }
+
+    /**
+     * Crée une équipe personnelle pour l'utilisateur.
+     */
+    protected function createPersonalTeam(User $user)
+    {
+        return DB::transaction(function () use ($user) {
+            $team = Team::create([
+                'name' => $user->name . "'s Team",
+                'owner_id' => $user->id,
+            ]);
+
+            $user->teams()->attach($team->id, ['role' => 'owner']);
+            $user->update(['current_team_id' => $team->id]);
+
+            return $team;
+        });
     }
 }
