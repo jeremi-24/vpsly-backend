@@ -13,7 +13,7 @@ return new class extends Migration
     {
         if (!Schema::hasColumn('applications', 'uuid')) {
             Schema::table('applications', function (Blueprint $table) {
-                $table->string('uuid')->unique()->after('id')->nullable();
+                $table->string('uuid')->unique()->nullable()->after('id');
             });
         }
     }
