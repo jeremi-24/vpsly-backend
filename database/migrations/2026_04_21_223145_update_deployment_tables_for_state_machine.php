@@ -21,7 +21,7 @@ return new class extends Migration
         });
 
         Schema::table('deployment_logs', function (Blueprint $table) {
-            $table->string('type')->default('info')->after('message'); // info, success, error, debug
+            $table->string('type')->default('info')->after('line'); // info, success, error, debug
         });
     }
 
