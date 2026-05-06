@@ -69,10 +69,22 @@ class GitHubApiController extends Controller
             $frontendUrl = rtrim(env('FRONTEND_URL', 'http://localhost:5173'), '/');
             return redirect()->to($frontendUrl . '/settings/integrations?success=github');
             
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('GitHub Callback Error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('GitHub Callback Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+            
             $frontendUrl = rtrim(env('FRONTEND_URL', 'http://localhost:5173'), '/');
-            return redirect()->to($frontendUrl . '/settings/integrations?error=' . urlencode($e->getMessage()));
+            $errorMessage = $e->getMessage();
+            
+            // Si c'est une erreur de clé de chiffrement (common on VPS)
+            if (str_contains($errorMessage, 'MAC')) {
+                $errorMessage = "Erreur de clé de chiffrement (APP_KEY). Contactez l'admin.";
+            }
+
+            return redirect()->to($frontendUrl . '/settings/integrations?error=' . urlencode($errorMessage));
         }
     }
 
