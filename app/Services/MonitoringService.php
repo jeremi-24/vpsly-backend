@@ -76,11 +76,35 @@ class MonitoringService
     }
 
     /**
-     * Déploie et compile l'agent sur le serveur.
+     * Déploie et installe l'agent sur le serveur distant.
      */
     public function deployAgent(Server $server): string
     {
-        // TODO: Implémenter le transfert sécurisé du binaire compilé ou du source
-        throw new \RuntimeException("L'auto-déploiement de l'agent n'est pas encore implémenté.");
+        $localPath = storage_path('app/bin/vpsly-agent-linux-amd64');
+        $remotePath = '/usr/local/bin/vpsly-agent';
+
+        if (!file_exists($localPath)) {
+            throw new \RuntimeException("Le binaire de l'agent est introuvable sur le serveur backend à l'emplacement: {$localPath}. Veuillez le compiler et le placer dans ce dossier.");
+        }
+
+        try {
+            $this->ssh->connect($server);
+            
+            // 1. Upload du binaire via SFTP
+            $this->ssh->uploadFile($remotePath, $localPath);
+            
+            // 2. Rendre le binaire exécutable
+            $this->ssh->exec("chmod +x {$remotePath}");
+            
+            // 3. Test de l'agent
+            $output = $this->ssh->exec("{$remotePath} stats");
+            
+            \Illuminate\Support\Facades\Log::info("Agent déployé avec succès sur le serveur {$server->id}");
+            
+            return $output;
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("Échec du déploiement de l'agent sur {$server->id}: " . $e->getMessage());
+            throw $e;
+        }
     }
 }

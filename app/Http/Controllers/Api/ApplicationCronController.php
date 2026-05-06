@@ -14,6 +14,7 @@ class ApplicationCronController extends Controller
 
     public function index(Application $application)
     {
+        $this->authorize('view', $application);
         return response()->json([
             'build_pack' => $application->build_pack,
             'has_laravel_scheduler' => $application->has_laravel_scheduler,
@@ -25,6 +26,7 @@ class ApplicationCronController extends Controller
 
     public function toggleLaravel(Application $application, Request $request)
     {
+        $this->authorize('update', $application);
         $application->update([
             'has_laravel_scheduler' => $request->boolean('active'),
         ]);
@@ -34,6 +36,7 @@ class ApplicationCronController extends Controller
 
     public function store(Application $application, Request $request)
     {
+        $this->authorize('update', $application);
         $validated = $request->validate([
             'command' => 'required|string',
             'frequency' => 'required|string',
@@ -47,6 +50,7 @@ class ApplicationCronController extends Controller
 
     public function destroy(Application $application, $id)
     {
+        $this->authorize('update', $application);
         $application->scheduledTasks()->where('id', $id)->delete();
 
         return $this->sync($application);
@@ -54,6 +58,7 @@ class ApplicationCronController extends Controller
 
     public function sync(Application $application)
     {
+        $this->authorize('update', $application);
         try {
             $this->cronService->sync($application);
             return $this->index($application);

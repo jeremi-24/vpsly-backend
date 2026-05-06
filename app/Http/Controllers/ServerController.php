@@ -23,6 +23,7 @@ class ServerController extends Controller
      */
     public function index()
     {
+        // La TeamScope s'occupe du filtrage
         return response()->json(
             Server::all()
         );
@@ -33,6 +34,8 @@ class ServerController extends Controller
      */
     public function store(Request $request, ServerKeyService $keyService)
     {
+        $this->authorize('create', Server::class);
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'ip' => 'required|ip|unique:servers,ip',
@@ -68,14 +71,13 @@ class ServerController extends Controller
      */
     public function testConnection(Server $server)
     {
-        $this->authorizeOwner($server);
+        $this->authorize('testConnection', $server);
 
         try {
             $this->sshService->connect($server);
             $server->update(['status' => 'connected']);
             
             // Installation automatique de l'agent de monitoring en arrière-plan
-            // On utilise un Job ou on lance la commande de manière asynchrone pour ne pas bloquer l'UI
             try {
                 \Illuminate\Support\Facades\Artisan::queue('vpsly:agent-install', [
                     'server_id' => $server->id
@@ -104,7 +106,7 @@ class ServerController extends Controller
      */
     public function show(Server $server)
     {
-        $this->authorizeOwner($server);
+        $this->authorize('view', $server);
 
         return response()->json($server);
     }
@@ -114,7 +116,7 @@ class ServerController extends Controller
      */
     public function update(Request $request, Server $server)
     {
-        $this->authorizeOwner($server);
+        $this->authorize('update', $server);
 
         $data = $request->validate([
             'name' => 'sometimes|required|string|max:255',
@@ -136,7 +138,7 @@ class ServerController extends Controller
      */
     public function destroy(Server $server)
     {
-        $this->authorizeOwner($server);
+        $this->authorize('delete', $server);
 
         // Protection contre la suppression si lié à des apps
         if ($server->applications()->exists()) {
@@ -157,7 +159,7 @@ class ServerController extends Controller
      */
     public function prune(Server $server, \App\Services\Deployment\DockerService $docker)
     {
-        $this->authorizeOwner($server);
+        $this->authorize('update', $server);
 
         try {
             $output = $docker->prune($server);
@@ -169,17 +171,6 @@ class ServerController extends Controller
             return response()->json([
                 'error' => 'Échec du nettoyage : ' . $e->getMessage()
             ], 500);
-        }
-    }
-
-    /**
-     * Vérifie que l'utilisateur est bien le propriétaire.
-     */
-    protected function authorizeOwner(Server $server)
-    {
-        if ($server->team_id !== auth()->user()->current_team_id) {
-            \Illuminate\Support\Facades\Log::warning("Accès refusé au serveur {$server->id}. Équipe serveur: {$server->team_id}, Équipe utilisateur: " . auth()->user()->current_team_id);
-            abort(403, 'Accès non autorisé à ce serveur.');
         }
     }
 }

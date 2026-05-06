@@ -14,6 +14,7 @@ class DatabaseController extends Controller
 {
     public function index(Request $request)
     {
+        // La Global Scope gère déjà le filtrage
         return StandaloneDatabase::with('server')
             ->latest()
             ->get();
@@ -21,6 +22,8 @@ class DatabaseController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorize('create', StandaloneDatabase::class);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'server_id' => 'required|exists:servers,id',
@@ -32,8 +35,9 @@ class DatabaseController extends Controller
             'has_adminer' => 'nullable|boolean',
         ]);
 
-        // Vérifier que le serveur est accessible (Le Global Scope gère déjà le filtrage par équipe)
+        // Vérifier que le serveur est accessible
         $server = Server::findOrFail($validated['server_id']);
+        $this->authorize('view', $server);
 
         $defaultImages = [
             'postgres' => 'postgres:15-alpine',
@@ -60,20 +64,18 @@ class DatabaseController extends Controller
 
     public function show(StandaloneDatabase $database)
     {
-        $this->authorizeOwner($database);
+        $this->authorize('view', $database);
 
         return $database->load(['server', 'persistentStorages']);
     }
 
     /**
-     * Lance le déploiement de la base de données (Action manuelle ou automatique).
+     * Lance le déploiement de la base de données.
      */
-    public function deploy($id)
+    public function deploy(StandaloneDatabase $database)
     {
-        $database = StandaloneDatabase::findOrFail($id);
-        $this->authorizeOwner($database);
+        $this->authorize('update', $database);
         
-        // Mise à jour de l'état avant le dispatch
         $database->update(['status' => 'deploying']);
 
         DeployDatabaseJob::dispatch($database);
@@ -89,12 +91,11 @@ class DatabaseController extends Controller
      */
     public function togglePublic(StandaloneDatabase $database)
     {
-        $this->authorizeOwner($database);
+        $this->authorize('update', $database);
 
         $database->is_public = !$database->is_public;
         
         if ($database->is_public && !$database->public_port) {
-            // Assignation d'un port public si activé
             $lastPort = StandaloneDatabase::where('server_id', $database->server_id)
                 ->whereNotNull('public_port')
                 ->max('public_port');
@@ -104,13 +105,12 @@ class DatabaseController extends Controller
         
         $database->save();
         
-        // On redéploie pour appliquer le changement
-        return $this->deploy($database->id);
+        return $this->deploy($database);
     }
-    public function verifyIntegrity($id, \App\Services\Deployment\SSHService $ssh)
+
+    public function verifyIntegrity(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
     {
-        $database = StandaloneDatabase::findOrFail($id);
-        $this->authorizeOwner($database);
+        $this->authorize('view', $database);
         $volumeName = "db-data-{$database->uuid}";
         
         try {
@@ -133,9 +133,10 @@ class DatabaseController extends Controller
             ], 500);
         }
     }
+
     public function link(Request $request, StandaloneDatabase $database)
     {
-        $this->authorizeOwner($database);
+        $this->authorize('update', $database);
 
         $validated = $request->validate([
             'application_id' => 'required|exists:applications,id'
@@ -145,10 +146,8 @@ class DatabaseController extends Controller
             'application_id' => $validated['application_id']
         ]);
 
-        // Déclencher le redéploiement de l'application
         $app = \App\Models\Application::find($validated['application_id']);
         if ($app) {
-             // On crée un nouveau déploiement via le contrôleur dédié pour avoir les logs
              $deployment = $app->deployments()->create([
                  'status' => 'pending',
              ]);
@@ -161,20 +160,15 @@ class DatabaseController extends Controller
         ]);
     }
 
-    /**
-     * Supprime l'instance de base de données.
-     */
     public function destroy(StandaloneDatabase $database)
     {
-        $this->authorizeOwner($database);
+        $this->authorize('delete', $database);
 
-        // 1. Dispatch du job de nettoyage (Avant suppression du modèle)
         \App\Jobs\DeleteDatabaseJob::dispatch(
             (int) $database->server_id, 
             (string) $database->uuid
         );
 
-        // 2. Suppression de l'entrée en DB
         $database->delete();
 
         return response()->json([
@@ -182,12 +176,9 @@ class DatabaseController extends Controller
         ]);
     }
 
-    /**
-     * Dissocie la base de données de son application.
-     */
     public function stop(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
     {
-        $this->authorizeOwner($database);
+        $this->authorize('update', $database);
 
         try {
             $ssh->connect($database->server);
@@ -207,7 +198,7 @@ class DatabaseController extends Controller
 
     public function start(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
     {
-        $this->authorizeOwner($database);
+        $this->authorize('update', $database);
 
         try {
             $ssh->connect($database->server);
@@ -227,7 +218,7 @@ class DatabaseController extends Controller
 
     public function unlink(StandaloneDatabase $database)
     {
-        $this->authorizeOwner($database);
+        $this->authorize('update', $database);
 
         $oldAppId = $database->application_id;
 
@@ -249,17 +240,5 @@ class DatabaseController extends Controller
             'message' => 'Lien rompu. Mise à jour de l\'application en cours...',
             'database' => $database
         ]);
-    }
-
-    /**
-     * Vérifie que l'utilisateur est bien le propriétaire du serveur qui héberge la base.
-     */
-    protected function authorizeOwner(StandaloneDatabase $database)
-    {
-        // On vérifie que la base appartient à l'équipe active de l'utilisateur
-        // Le Global Scope fait déjà 90% du travail, mais on sécurise ici
-        if ($database->team_id !== auth()->user()->current_team_id) {
-            abort(403, 'Accès non autorisé à cette base de données.');
-        }
     }
 }

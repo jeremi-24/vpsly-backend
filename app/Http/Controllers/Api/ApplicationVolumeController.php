@@ -12,11 +12,13 @@ class ApplicationVolumeController extends Controller
 {
     public function index(Application $application)
     {
+        $this->authorize('view', $application);
         return response()->json($application->persistentVolumes);
     }
 
     public function store(Request $request, Application $application)
     {
+        $this->authorize('update', $application);
         $request->validate([
             'mount_path' => ['required', 'string', 'regex:/^[\/a-zA-Z0-9\._-]+$/'],
             'host_path' => 'nullable|string',
@@ -38,6 +40,7 @@ class ApplicationVolumeController extends Controller
 
     public function destroy(Application $application, $id)
     {
+        $this->authorize('update', $application);
         $volume = $application->persistentVolumes()->findOrFail($id);
         $volume->delete();
 

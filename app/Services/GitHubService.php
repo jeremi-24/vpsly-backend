@@ -109,7 +109,7 @@ class GitHubService
     /**
      * Enregistre un webhook pour un dépôt.
      */
-    public function createWebhook(User $user, string $owner, string $repo, string $callbackUrl): int
+    public function createWebhook(User $user, string $owner, string $repo, string $callbackUrl, ?string $secret = null): int
     {
         if (!$user->github_token) {
             throw new Exception("Compte GitHub non connecté.");
@@ -125,7 +125,7 @@ class GitHubService
                     'url' => $callbackUrl,
                     'content_type' => 'json',
                     'insecure_ssl' => '0',
-                    'secret' => config('app.webhook_secret', 'vpsly_secret_key'),
+                    'secret' => $secret ?? config('app.webhook_secret', 'vpsly_secret_key'),
                 ],
             ]);
 

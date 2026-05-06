@@ -10,9 +10,9 @@ use Illuminate\Http\Request;
 
 class ApplicationBackupController extends Controller
 {
-    public function index($appId)
+    public function index(Application $application)
     {
-        $application = Application::findOrFail($appId);
+        $this->authorize('view', $application);
         return response()->json(
             Backup::where('application_id', $application->id)
                 ->latest()
@@ -20,9 +20,9 @@ class ApplicationBackupController extends Controller
         );
     }
 
-    public function store(Request $request, $appId)
+    public function store(Request $request, Application $application)
     {
-        $application = Application::findOrFail($appId);
+        $this->authorize('update', $application);
         $request->validate([
             'database_id' => 'nullable|exists:standalone_databases,id',
             'volume_id' => 'nullable|exists:local_persistent_volumes,id',
@@ -43,9 +43,9 @@ class ApplicationBackupController extends Controller
         return response()->json($backup);
     }
 
-    public function destroy($appId, $backupId)
+    public function destroy(Application $application, $backupId)
     {
-        $application = Application::with('server')->findOrFail($appId);
+        $this->authorize('update', $application);
         $backup = Backup::where('application_id', $application->id)->findOrFail($backupId);
 
         // 1. Suppression sur le VPS (si présent)
@@ -68,7 +68,7 @@ class ApplicationBackupController extends Controller
 
             if ($driveId) {
                 try {
-                    $user = $application->user;
+                    $user = $application->team->owner; // Correction : On utilise le propriétaire de la team
                     $settings = $user->backupSettings()->first();
                     if ($settings) {
                         $driveService = new \App\Services\Backup\GoogleDriveService($settings);
@@ -84,9 +84,9 @@ class ApplicationBackupController extends Controller
         return response()->json(['message' => 'Sauvegarde supprimée.']);
     }
 
-    public function restore($appId, $backupId)
+    public function restore(Application $application, $backupId)
     {
-        $application = Application::findOrFail($appId);
+        $this->authorize('update', $application);
         $backup = Backup::where('application_id', $application->id)->findOrFail($backupId);
 
         // On ne peut pas restaurer si une restauration est déjà en cours
@@ -102,9 +102,9 @@ class ApplicationBackupController extends Controller
         ]);
     }
 
-    public function download($appId, $backupId)
+    public function download(Application $application, $backupId)
     {
-        $application = Application::with('server', 'user')->findOrFail($appId);
+        $this->authorize('update', $application);
         $backup = Backup::where('application_id', $application->id)->findOrFail($backupId);
 
         if ($backup->status !== 'success') {

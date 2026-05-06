@@ -12,6 +12,7 @@ class ApplicationController extends Controller
 {
     public function index()
     {
+        // La Global Scope TeamScope filtre déjà par team_id
         return response()->json(
             Application::with(['server', 'databases', 'persistentVolumes'])
                 ->latest()
@@ -21,6 +22,8 @@ class ApplicationController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorize('create', Application::class);
+
         $request->validate([
             'server_id' => 'required|exists:servers,id',
             'name' => 'required|string|unique:applications,name',
@@ -33,6 +36,7 @@ class ApplicationController extends Controller
             'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
             'log_command' => 'nullable|string',
         ]);
+
         $user = auth()->user();
         $team = $user->currentTeam;
 
@@ -81,13 +85,13 @@ class ApplicationController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, $id)
+    public function update(Request $request, Application $application)
     {
-        $app = Application::findOrFail($id);
+        $this->authorize('update', $application);
 
         $request->validate([
             'server_id' => 'required|exists:servers,id',
-            'name' => 'required|string|unique:applications,name,' . $app->id,
+            'name' => 'required|string|unique:applications,name,' . $application->id,
             'deployment_mode' => 'required|string|in:docker,legacy_existing',
             'repo_url' => 'required_if:deployment_mode,docker|nullable|url',
             'branch' => 'nullable|string',
@@ -97,6 +101,7 @@ class ApplicationController extends Controller
             'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
             'log_command' => 'nullable|string',
         ]);
+
         $team = auth()->user()->currentTeam;
 
         // Vérification du domaine personnalisé
@@ -107,7 +112,7 @@ class ApplicationController extends Controller
             ], 403);
         }
 
-        $app->update([
+        $application->update([
             'name' => $request->name,
             'repo_url' => $request->repo_url,
             'branch' => $request->branch ?? 'main',
@@ -121,60 +126,59 @@ class ApplicationController extends Controller
 
         return response()->json([
             'message' => 'Application mise à jour avec succès.',
-            'application' => $app->load('server')
+            'application' => $application->load('server')
         ]);
     }
 
-    public function show($id)
+    public function show(Application $application)
     {
-        $user = auth()->user();
-        $app = Application::with([
-                'server',
-                'deployments' => fn($q) => $q->latest()->limit(5),
-                'environmentVariables',
-                'databases',
-                'persistentVolumes',
-            ])
-            ->findOrFail($id);
+        $this->authorize('view', $application);
 
-        return response()->json($app);
+        return response()->json($application->load([
+            'server',
+            'deployments' => fn($q) => $q->latest()->limit(5),
+            'environmentVariables',
+            'databases',
+            'persistentVolumes',
+        ]));
     }
 
-    public function destroy($id, \App\Services\GitHubService $github)
+    public function destroy(Application $application, \App\Services\GitHubService $github)
     {
+        $this->authorize('delete', $application);
+
         $user = auth()->user();
-        $app = Application::findOrFail($id);
 
         // 1. Dispatch du nettoyage serveur (Avant de supprimer le modèle !)
-        \App\Jobs\DeleteApplicationJob::dispatch((int)$app->server_id, (string)$app->slug);
+        // On utilise sanitized_name au lieu de slug (qui n'existe pas)
+        \App\Jobs\DeleteApplicationJob::dispatch((int)$application->server_id, (string)$application->sanitized_name);
 
         // 2. Nettoyage Webhook GitHub
-        if ($app->github_hook_id && $user->github_token) {
+        if ($application->github_hook_id && $user->github_token) {
             try {
-                $urlPath = parse_url($app->repo_url, PHP_URL_PATH);
+                $urlPath = parse_url($application->repo_url, PHP_URL_PATH);
                 $parts = explode('/', trim($urlPath, '/'));
                 if (count($parts) >= 2) {
                     $owner = $parts[0];
                     $repo = str_replace('.git', '', $parts[1]);
-                    $github->deleteWebhook($user, $owner, $repo, (int)$app->github_hook_id);
+                    $github->deleteWebhook($user, $owner, $repo, (int)$application->github_hook_id);
                 }
             } catch (\Exception $e) {
                 \Illuminate\Support\Facades\Log::warning("Échec suppression webhook : " . $e->getMessage());
             }
         }
 
-        $app->delete();
+        $application->delete();
 
         return response()->json(['message' => 'Application supprimée avec succès. Le nettoyage du serveur est en cours en arrière-plan.']);
     }
 
-    public function deployments($id)
+    public function deployments(Application $application)
     {
-        $user = auth()->user();
-        $app = Application::findOrFail($id);
+        $this->authorize('deployments', $application);
         
         return response()->json(
-            $app->deployments()->latest()->paginate(20)
+            $application->deployments()->latest()->paginate(20)
         );
     }
 }

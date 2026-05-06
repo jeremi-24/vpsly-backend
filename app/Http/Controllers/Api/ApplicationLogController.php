@@ -17,6 +17,7 @@ class ApplicationLogController extends Controller
      */
     public function index(Application $app, RuntimeLogService $logService, SSHService $ssh)
     {
+        $this->authorize('view', $app);
         // 1. Connexion SSH au serveur de l'app
         $ssh->connect($app->server);
 
@@ -35,6 +36,7 @@ class ApplicationLogController extends Controller
      */
     public function stream(Application $app)
     {
+        $this->authorize('view', $app);
         // On dispatch le job sur une queue dédiée 'logs' pour ne pas bloquer les déploiements
         StreamRuntimeLogsJob::dispatch($app->id)->onQueue('logs');
 

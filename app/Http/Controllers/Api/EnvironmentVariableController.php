@@ -12,10 +12,7 @@ class EnvironmentVariableController extends Controller
 {
     public function index(Application $application)
     {
-        // Sécurité : on vérifie que l'utilisateur possède l'application
-        if ($application->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('view', $application);
 
         return $application->environmentVariables()
             ->get()
@@ -31,9 +28,7 @@ class EnvironmentVariableController extends Controller
 
     public function store(Request $request, Application $application)
     {
-        if ($application->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('update', $application);
 
         $data = $request->validate([
             'key' => ['required', 'string', 'max:255', 'regex:/^[A-Z0-9_]+$/'],
@@ -48,9 +43,7 @@ class EnvironmentVariableController extends Controller
 
     public function bulk(Request $request, Application $application)
     {
-        if ($application->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('update', $application);
 
         $data = $request->validate([
             'variables' => 'required|array',
@@ -98,9 +91,7 @@ class EnvironmentVariableController extends Controller
 
     public function destroy(Application $application, $id)
     {
-        if ($application->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('update', $application);
 
         $variable = EnvironmentVariable::where('application_id', $application->id)
             ->where('id', $id)
@@ -113,9 +104,7 @@ class EnvironmentVariableController extends Controller
 
     public function reveal(Application $application, $id)
     {
-        if ($application->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('update', $application);
 
         $variable = EnvironmentVariable::where('application_id', $application->id)
             ->where('id', $id)

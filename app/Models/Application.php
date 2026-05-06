@@ -28,6 +28,7 @@ class Application extends BaseModel
         'target_path',
         'deploy_script',
         'log_command',
+        'webhook_secret',
     ];
 
     protected function casts(): array
@@ -88,5 +89,19 @@ class Application extends BaseModel
     {
         return $this->where($field ?? $this->getRouteKeyName(), $value)
             ->firstOrFail();
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($model) {
+            if (empty($model->uuid)) {
+                $model->uuid = (string) \Illuminate\Support\Str::uuid();
+            }
+            if (empty($model->webhook_secret)) {
+                $model->webhook_secret = \Illuminate\Support\Str::random(32);
+            }
+        });
     }
 }

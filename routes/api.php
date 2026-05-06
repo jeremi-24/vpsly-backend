@@ -69,10 +69,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // ... (routes applications)
         Route::get('/', [ApplicationController::class, 'index']);
         Route::post('/', [ApplicationController::class, 'store'])->middleware('check_quota:max_apps');
-        Route::get('/{id}', [ApplicationController::class, 'show']);
-        Route::put('/{id}', [ApplicationController::class, 'update']);
-        Route::get('/{id}/deployments', [ApplicationController::class, 'deployments']);
-        Route::delete('/{id}', [ApplicationController::class, 'destroy']);
+        Route::get('/{application}', [ApplicationController::class, 'show']);
+        Route::put('/{application}', [ApplicationController::class, 'update']);
+        Route::get('/{application}/deployments', [ApplicationController::class, 'deployments']);
+        Route::delete('/{application}', [ApplicationController::class, 'destroy']);
 
         // Variables d'Environnement
         Route::prefix('{application}/env-vars')->group(function () {
@@ -179,4 +179,4 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::get('/auth/google/drive/callback', [\App\Http\Controllers\Api\GoogleDriveController::class, 'callback']);
 Route::get('/github/auth/callback', [\App\Http\Controllers\Api\GitHubApiController::class, 'callback']);
 
-Route::post('/webhooks/github', [\App\Http\Controllers\Api\GitHubWebhookController::class, 'handle']);
+Route::post('/webhooks/github/{uuid?}', [\App\Http\Controllers\Api\GitHubWebhookController::class, 'handle']);

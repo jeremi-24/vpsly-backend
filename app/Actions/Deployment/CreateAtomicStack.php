@@ -55,9 +55,9 @@ class CreateAtomicStack
                         $repo = $parts[1];
                         $repo = str_replace('.git', '', $repo);
 
-                        $callbackUrl = config('app.url') . '/api/webhooks/github';
+                        $callbackUrl = config('app.url') . '/api/webhooks/github/' . $app->uuid;
                         
-                        $hookId = $this->github->createWebhook($user, $owner, $repo, $callbackUrl);
+                        $hookId = $this->github->createWebhook($user, $owner, $repo, $callbackUrl, $app->webhook_secret);
                         
                         $app->update(['github_hook_id' => $hookId]);
                     }
