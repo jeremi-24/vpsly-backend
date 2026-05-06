@@ -37,7 +37,11 @@ class BlueprintService
         $isPhp = $this->isPhp($nixpacksPlan);
         
         $serverIp = $app->server->ip ?? '127.0.0.1';
-        $domain = $app->domain ?: "{$appSlug}.{$serverIp}.sslip.io";
+        $sslipDomain = "{$appSlug}.{$serverIp}.sslip.io";
+
+        // Business Rule: Starter = sslip.io only. Solo/Pro = Custom Domain allowed.
+        $plan = $app->team?->plan ?? 'starter';
+        $domain = ($plan === 'starter') ? $sslipDomain : ($app->domain ?: $sslipDomain);
 
         $envVars = [
             'APP_NAME' => $appSlug,
@@ -126,7 +130,11 @@ class BlueprintService
         $containerPort = $isPhp ? 80 : 3000;
         
         $serverIp = $app->server->ip ?? '127.0.0.1';
-        $domain = $app->domain ?: "{$appSlug}.{$serverIp}.sslip.io";
+        $sslipDomain = "{$appSlug}.{$serverIp}.sslip.io";
+        
+        // Business Rule: Starter = sslip.io only. Solo/Pro = Custom Domain allowed.
+        $plan = $app->team?->plan ?? 'starter';
+        $domain = ($plan === 'starter') ? $sslipDomain : ($app->domain ?: $sslipDomain);
 
         // Limites de ressources (Ajustées pour petit VPS)
         $cpuLimit = "0.5";
