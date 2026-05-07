@@ -76,7 +76,11 @@ class RuntimeLogService
 
         $this->ssh->stream($command, function($line) use ($resource, $channelName) {
             if (trim($line)) {
-                broadcast(new RuntimeLogEvent($resource->id, $line, $channelName));
+                try {
+                    broadcast(new RuntimeLogEvent($resource->id, $line, $channelName));
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error("[RuntimeLog] Broadcast failed: " . $e->getMessage());
+                }
             }
         });
     }

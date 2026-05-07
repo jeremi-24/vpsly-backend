@@ -52,7 +52,11 @@ class LogStreamer
         }
 
         // Broadcast immédiat (ShouldBroadcastNow)
-        broadcast(new DeploymentLogEvent($deployment->id, $this->buffer));
+        try {
+            broadcast(new DeploymentLogEvent($deployment->id, $this->buffer));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("[LogStreamer] Broadcast failed: " . $e->getMessage());
+        }
 
         $this->buffer = [];
         $this->lastFlushTime = microtime(true);
