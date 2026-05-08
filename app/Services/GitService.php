@@ -3,10 +3,11 @@
 namespace App\Services;
 
 use Exception;
+use App\Services\Deployment\SSHService;
 
 class GitService
 {
-    public function __construct(protected SshService $ssh) {}
+    public function __construct(protected SSHService $ssh) {}
 
     public function clone(string $repo, string $branch, string $path, ?string $token = null): void
     {

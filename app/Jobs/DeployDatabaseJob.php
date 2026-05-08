@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Events\DatabaseStatusUpdatedEvent;
 use App\Models\StandaloneDatabase;
 use App\Services\Deployment\DatabaseProvisioner;
+use App\Services\Deployment\LegacyDatabaseProvisioner;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -26,15 +27,19 @@ class DeployDatabaseJob implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(DatabaseProvisioner $provisioner): void
+    public function handle(DatabaseProvisioner $dockerProvisioner, LegacyDatabaseProvisioner $legacyProvisioner): void
     {
         Log::info("[Job] Starting deployment for database: {$this->database->name}");
+        $server = $this->database->server;
         
         try {
-             // Statut initial déjà mis à jour dans le controller, mais on peut le rediffuser
             event(new DatabaseStatusUpdatedEvent($this->database));
 
-            $provisioner->provision($this->database);
+            if ($server->infrastructure_type === 'legacy') {
+                $legacyProvisioner->provision($this->database);
+            } else {
+                $dockerProvisioner->provision($this->database);
+            }
             
             $this->database->update(['status' => 'running']);
             event(new DatabaseStatusUpdatedEvent($this->database));

@@ -6,7 +6,7 @@ use App\Models\StandaloneDatabase;
 use App\Models\User;
 use Illuminate\Auth\Access\Response;
 
-class DatabasePolicy
+class StandaloneDatabasePolicy
 {
     /**
      * Determine whether the user can view any models.

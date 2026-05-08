@@ -19,6 +19,7 @@ class DeploymentOrchestrator
         protected GitService $git,
         protected NixpacksService $nixpacks,
         protected BlueprintService $blueprint,
+        protected LegacyConfigService $legacyConfig,
         protected LogStreamer $streamer,
         protected CronService $cron
     ) {
@@ -46,188 +47,15 @@ class DeploymentOrchestrator
         ]);
 
         try {
-            // Bifurcation selon le mode de déploiement
-            if ($app->deployment_mode === 'legacy_existing') {
+            // DETERMINISTIC BRANCHING BASED ON SERVER TYPE
+            if ($server->infrastructure_type === 'legacy') {
+                Log::info("[Deploy] Server is LEGACY. Using native SSH deployment.");
                 $this->deployLegacy($app, $server, $deployment);
                 return;
             }
 
-            // STEP 1: PREPARING
-            Log::info("[Deploy] Step 1: Preparing status...");
-            $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
-
-            if (!$deployment->deployment_uuid) {
-                $deployment->update(['deployment_uuid' => (string) Str::uuid()]);
-            }
-
-            Log::info("[Deploy] Step 1: Connecting to SSH...");
-            $this->streamer->log($deployment, "Connecting to VPS {$server->ip}...", LogType::INFO);
-
-            $this->ssh->connect($server);
-
-            // S'assurer que les outils de base sont là
-            $this->docker->ensureInstalled($server, $deployment);
-            $this->nixpacks->ensureInstalled($server, $deployment);
-            $this->ensureTraefik($server, $deployment);
-
-            $appSlug = $this->blueprint->getSlug($app);
-            $appPath = "/var/www/vpsly/apps/" . $appSlug;
-            $this->ssh->exec("mkdir -p \"{$appPath}\"");
-
-            $this->streamer->log($deployment, "Connected. Workspace ready at {$appPath}", LogType::SUCCESS);
-
-            // ANALYSE : Variables problématiques (Copy of Coolify)
-            $userVars = $app->environmentVariables()->pluck('value', 'key')->toArray();
-            $warnings = \App\Traits\EnvironmentVariableAnalyzer::analyzeBuildVariables($userVars);
-            foreach ($warnings as $warning) {
-                $this->streamer->log($deployment, "⚠️ BUILD WARNING: {$warning['variable']}={$warning['value']}", LogType::INFO);
-                $this->streamer->log($deployment, "   Issue: {$warning['issue']}", LogType::DEBUG);
-                $this->streamer->log($deployment, "   Recommendation: {$warning['recommendation']}", LogType::DEBUG);
-            }
-
-            // STEP 2: CLONING
-            $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
-            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
-            $this->streamer->log($deployment, "Synchronizing code from {$app->repo_url}...", LogType::INFO);
-
-            $this->git->sync($app->repo_url, $app->branch, $appPath, $app->user->github_token);
-
-            // VERSIONING : On récupère le commit (Copy of Coolify)
-            $commitInfo = $this->git->getLatestCommit($appPath);
-            $deployment->update([
-                'commit' => $commitInfo['hash'],
-                'commit_message' => $commitInfo['message']
-            ]);
-
-            $this->streamer->log($deployment, "Code synchronized. Commit: " . substr($commitInfo['hash'], 0, 7) . " - " . $commitInfo['message'], LogType::SUCCESS);
-
-            // NETTOYAGE : Invalidation du cache et des fichiers de détection parasites
-            $this->ssh->exec("rm -rf \"{$appPath}/.nixpacks\" \"{$appPath}/.node-version\" \"{$appPath}/.npmrc\" \"{$appPath}/.pnpm-lock.yaml\"");
-
-            // ANALYSE : Résolution de la version Node
-            $nodeVersion = $this->resolveNodeVersion($appPath, $deployment);
-            $this->ssh->exec("echo \"{$nodeVersion}\" > \"{$appPath}/.node-version\"");
-
-            // STEP 3: BUILDING (Nixpacks Engine)
-            $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
-            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
-            $this->streamer->log($deployment, "Starting Nixpacks build process...", LogType::INFO);
-
-            // ANALYSE : On récupère le plan nixpacks pour identifier la stack
-            $nixpacksPlan = $this->nixpacks->getPlan($server, $deployment, $appPath, $nodeVersion);
-
-            // IMAGE TAG : On utilise le SHA pour l'immuabilité (Copy of Coolify)
-            $imageTag = substr($commitInfo['hash'], 0, 12);
-            $imageName = "vpsly/{$appSlug}:{$imageTag}";
-
-            $this->nixpacks->build($server, $deployment, $appPath, $imageName, $nodeVersion);
-
-            // STEP 4: DEPLOYING (Docker Compose)
-            $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
-            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
-            $this->streamer->log($deployment, "Preparing deployment configurations...", LogType::INFO);
-
-            $this->blueprint->syncConfiguration($app, $imageName, $appPath, $nixpacksPlan);
-
-
-            // SÉCURISATION finale des permissions .env
-            $this->ssh->exec("cd \"{$appPath}\" && chmod 600 .env");
-
-            $this->streamer->log($deployment, "Deploying with Docker Compose...", LogType::INFO);
-
-            // S'assurer que le réseau global vpsly existe (Standard vpsly)
-            $this->ssh->exec("docker network create vpsly 2>/dev/null || true");
-
-            try {
-                $this->ssh->stream("cd \"{$appPath}\" && docker compose up -d --remove-orphans", function ($line) use ($deployment) {
-                    $this->streamer->log($deployment, $line, LogType::DEBUG);
-                });
-
-                // AUTO-MIGRATION (Logique intelligente par stack)
-                if ($this->blueprint->isPhp($nixpacksPlan)) {
-                    $this->streamer->log($deployment, "📦 Detected Laravel/PHP stack. Waiting for container...", LogType::INFO);
-
-                    // Attendre que le container soit vraiment running (Fix OOM/Race condition)
-                    $maxWait = 15;
-                    $waited = 0;
-                    $status = 'starting';
-
-                    while ($waited < $maxWait) {
-                        $status = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$appSlug} 2>/dev/null || echo 'missing'"));
-                        if ($status === 'running')
-                            break;
-
-                        sleep(2);
-                        $waited += 2;
-                    }
-
-                    if ($status !== 'running') {
-                        throw new \App\Exceptions\Deployment\NonRetryableException("Le container {$appSlug} n'a pas démarré à temps (Status: {$status}).");
-                    }
-
-                    $this->streamer->log($deployment, "Container is running. Checking linked databases...", LogType::INFO);
-
-                    // ATTENTE DES DB LIÉES (Fix DNS Race Condition)
-                    foreach ($app->databases as $linkedDb) {
-                        $this->streamer->log($deployment, "Waiting for database {$linkedDb->name} to be ready...", LogType::DEBUG);
-                        $dbWait = 0;
-                        $dbReady = false;
-                        while ($dbWait < 30) {
-                            $dbStatus = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$linkedDb->uuid} 2>/dev/null || echo 'missing'"));
-                            if ($dbStatus === 'running') {
-                                $dbReady = true;
-                                break;
-                            }
-                            sleep(2);
-                            $dbWait += 2;
-                        }
-                        if (!$dbReady) {
-                            throw new \App\Exceptions\Deployment\NonRetryableException("La base de données liée {$linkedDb->name} n'est pas prête.");
-                        }
-                    }
-
-                    $this->streamer->log($deployment, "Databases are ready. Starting migrations...", LogType::INFO);
-                    $this->ssh->stream("docker exec {$appSlug} php artisan migrate --force", function ($line) use ($deployment) {
-                        $this->streamer->log($deployment, $line, LogType::DEBUG);
-                    });
-                } elseif ($this->planContains($nixpacksPlan, 'prisma')) {
-                    $this->streamer->log($deployment, "📦 Detected Prisma. Running migrations...", LogType::INFO);
-                    $this->ssh->stream("docker exec {$appSlug} npx prisma migrate deploy", function ($line) use ($deployment) {
-                        $this->streamer->log($deployment, $line, LogType::DEBUG);
-                    });
-                }
-
-                // FIX PERMISSIONS : Volumes
-                $volumes = $app->persistentVolumes()->get();
-                if ($volumes->count() > 0) {
-                    foreach ($volumes as $vol) {
-                        $this->ssh->exec("docker exec {$appSlug} chown -R 33:33 \"{$vol->mount_path}\" 2>/dev/null || true");
-                    }
-                }
-            } catch (Exception $e) {
-                throw new \App\Exceptions\Deployment\NonRetryableException("Docker Compose failed: " . $e->getMessage(), 0, $e);
-            }
-
-
-            // STEP 5: VERIFY (Health Check)
-            $this->verify($app, $deployment, $appPath, $nixpacksPlan);
-
-            // STEP 6: SYNC CRONS (Automated Sync)
-            try {
-                $this->streamer->log($deployment, " Synchronizing scheduled tasks...", LogType::INFO);
-                $this->cron->sync($app);
-                $this->streamer->log($deployment, " Scheduled tasks synchronized.", LogType::INFO);
-            } catch (Exception $e) {
-                $this->streamer->log($deployment, "⚠️ Cron sync failed: " . $e->getMessage(), LogType::WARNING);
-            }
-
-            // FINAL STEP: SUCCESS
-            $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
-            $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
-            $this->streamer->log($deployment, " Deployment successful!", LogType::SUCCESS);
-
-            // CLEANUP
-            $this->cleanup($deployment);
+            // CLEAN SERVER FLOW (Docker + Traefik)
+            $this->deployClean($app, $server, $deployment);
 
         } catch (\Throwable $e) {
             $msg = "❌ DEPLOYMENT FAILED: " . $e->getMessage();
@@ -263,6 +91,124 @@ class DeploymentOrchestrator
     }
 
     /**
+     * Flux de déploiement pour serveur CLEAN (Docker + Traefik).
+     */
+    protected function deployClean(Application $app, Server $server, Deployment $deployment): void
+    {
+        // STEP 1: PREPARING
+        Log::info("[Deploy-Clean] Step 1: Preparing status...");
+        $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
+
+        if (!$deployment->deployment_uuid) {
+            $deployment->update(['deployment_uuid' => (string) Str::uuid()]);
+        }
+
+        Log::info("[Deploy-Clean] Step 1: Connecting to SSH...");
+        $this->streamer->log($deployment, "Connecting to VPS {$server->ip} (Clean Mode)...", LogType::INFO);
+
+        $this->ssh->connect($server);
+
+        // S'assurer que les outils de base sont là
+        $this->docker->ensureInstalled($server, $deployment);
+        $this->nixpacks->ensureInstalled($server, $deployment);
+        $this->ensureTraefik($server, $deployment);
+
+        $appSlug = $this->blueprint->getSlug($app);
+        $appPath = "/var/www/vpsly/apps/" . $appSlug;
+        $appPathEscaped = escapeshellarg($appPath);
+        $this->ssh->exec("mkdir -p {$appPathEscaped}");
+
+        $this->streamer->log($deployment, "Connected. Workspace ready at {$appPath}", LogType::SUCCESS);
+
+        // ANALYSE : Variables problématiques
+        $userVars = $app->environmentVariables()->pluck('value', 'key')->toArray();
+        $warnings = \App\Traits\EnvironmentVariableAnalyzer::analyzeBuildVariables($userVars);
+        foreach ($warnings as $warning) {
+            $this->streamer->log($deployment, "⚠️ BUILD WARNING: {$warning['variable']}={$warning['value']}", LogType::INFO);
+        }
+
+        // STEP 2: CLONING
+        $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
+        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+        $this->streamer->log($deployment, "Synchronizing code from {$app->repo_url}...", LogType::INFO);
+
+        $this->git->sync($app->repo_url, $app->branch, $appPath, $app->user->github_token);
+
+        // VERSIONING : On récupère le commit
+        $commitInfo = $this->git->getLatestCommit($appPath);
+        $deployment->update([
+            'commit' => $commitInfo['hash'],
+            'commit_message' => $commitInfo['message']
+        ]);
+
+        $this->streamer->log($deployment, "Code synchronized. Commit: " . substr($commitInfo['hash'], 0, 7), LogType::SUCCESS);
+
+        // NETTOYAGE : Invalidation du cache
+        $this->ssh->exec("rm -rf {$appPathEscaped}/.nixpacks {$appPathEscaped}/.node-version {$appPathEscaped}/.npmrc {$appPathEscaped}/.pnpm-lock.yaml");
+
+        // ANALYSE : Résolution de la version Node
+        $nodeVersion = $this->resolveNodeVersion($appPath, $deployment);
+        $nodeVersionEscaped = escapeshellarg($nodeVersion);
+        $this->ssh->exec("echo {$nodeVersionEscaped} > {$appPathEscaped}/.node-version");
+
+        // STEP 3: BUILDING (Nixpacks Engine)
+        $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
+        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+        $this->streamer->log($deployment, "Starting Nixpacks build process...", LogType::INFO);
+
+        $nixpacksPlan = $this->nixpacks->getPlan($server, $deployment, $appPath, $nodeVersion);
+        $imageTag = substr($commitInfo['hash'], 0, 12);
+        $imageName = "vpsly/{$appSlug}:{$imageTag}";
+
+        $this->nixpacks->build($server, $deployment, $appPath, $imageName, $nodeVersion);
+
+        // STEP 4: DEPLOYING (Docker Compose)
+        $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
+        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+        $this->streamer->log($deployment, "Preparing deployment configurations...", LogType::INFO);
+
+        $this->blueprint->syncConfiguration($app, $imageName, $appPath, $nixpacksPlan);
+
+        // SÉCURISATION finale des permissions .env
+        $this->ssh->exec("cd {$appPathEscaped} && chmod 600 .env");
+
+        $this->streamer->log($deployment, "Deploying with Docker Compose...", LogType::INFO);
+
+        // S'assurer que le réseau global vpsly existe
+        $this->ssh->exec("docker network create vpsly 2>/dev/null || true");
+
+        $this->ssh->stream("cd {$appPathEscaped} && docker compose up -d --remove-orphans", function ($line) use ($deployment) {
+            $this->streamer->log($deployment, $line, LogType::DEBUG);
+        });
+
+        // AUTO-MIGRATION
+        if ($this->blueprint->isPhp($nixpacksPlan)) {
+            $appSlugEscaped = escapeshellarg($appSlug);
+            $this->ssh->stream("docker exec {$appSlugEscaped} php artisan migrate --force", function ($line) use ($deployment) {
+                $this->streamer->log($deployment, $line, LogType::DEBUG);
+            });
+        }
+
+        // STEP 5: VERIFY (Health Check)
+        $this->verify($app, $deployment, $appPath, $nixpacksPlan);
+
+        // STEP 6: SYNC CRONS
+        try {
+            $this->cron->sync($app);
+        } catch (Exception $e) {
+            $this->streamer->log($deployment, "⚠️ Cron sync failed", LogType::WARNING);
+        }
+
+        // FINAL SUCCESS
+        $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
+        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
+        $this->streamer->log($deployment, " Deployment successful!", LogType::SUCCESS);
+
+        $this->cleanup($deployment);
+    }
+
+
+    /**
      * Vérifie que l'application répond réellement (Hybrid Check - Copy of Coolify).
      */
     protected function verify(Application $app, Deployment $deployment, string $appPath, array $nixpacksPlan): void
@@ -282,7 +228,7 @@ class DeploymentOrchestrator
 
             // 1. État Docker (Check Health status du YAML)
             $health = trim($this->ssh->exec("docker inspect --format='{{.State.Health.Status}}' {$appSlug} 2>/dev/null || echo 'starting'"));
-            $status = trim($this->ssh->exec("docker inspect --format='{{.State.Status}}' {$appSlug} 2>/dev/null || echo 'missing'"));
+            $status = trim($this->ssh->exec("docker inspect -f '{{.State.Status}}' {$appSlug} 2>/dev/null || echo 'not_found'"));
 
             if ($health === 'healthy') {
                 $this->streamer->log($deployment, " Container is healthy (Docker Healthcheck Passed)", LogType::SUCCESS);
@@ -295,18 +241,42 @@ class DeploymentOrchestrator
                 break;
             }
 
-            // 2. Fallback Health Check (HTTP)
-            $publicCheck = trim($this->ssh->exec("curl -k -s -o /dev/null -w '%{http_code}' https://{$domain} --max-time 2 2>/dev/null || echo '000'"));
-            if (in_array($publicCheck, ['200', '301', '302', '304', '401', '405'])) {
-                $this->streamer->log($deployment, " App is responsive (HTTP {$publicCheck})", LogType::SUCCESS);
+            // 2. Health Check Layer (Internal focus to avoid DNS/SSL issues)
+            $hcPath = $app->healthcheck_path ?: '/';
+            $hcCodesStr = $app->healthcheck_status_codes ?: '200,301,302,304,401,405';
+            $allowedCodes = array_map('intval', explode(',', $hcCodesStr));
+            $containerPort = (str_contains($app->image ?: '', 'php') || $app->build_pack === 'nixpacks') ? 80 : 3000;
+
+            // Test 1: Internal Health Check (Directly in container)
+            $check = (int) trim($this->ssh->exec("docker exec {$appSlug} curl -k -s -o /dev/null -w '%{http_code}' http://localhost:{$containerPort}{$hcPath} --max-time 3 2>/dev/null || echo '000'"));
+            
+            if (in_array($check, $allowedCodes)) {
+                $this->streamer->log($deployment, "✅ App is healthy (Internal HTTP {$check} on {$hcPath})", LogType::SUCCESS);
                 $success = true;
                 break;
             }
 
-            $this->streamer->log($deployment, " Waiting for app to become healthy... ({$attempt}/{$maxAttempts})", LogType::DEBUG);
-            sleep(2);
-        }
+            // Test 2: Internal Fallback to Root
+            if ($hcPath !== '/') {
+                $rootCheck = (int) trim($this->ssh->exec("docker exec {$appSlug} curl -k -s -o /dev/null -w '%{http_code}' http://localhost:{$containerPort}/ --max-time 3 2>/dev/null || echo '000'"));
+                if (in_array($rootCheck, $allowedCodes) || ($rootCheck > 0 && $rootCheck < 500)) {
+                    $this->streamer->log($deployment, "⚠️ Internal Health endpoint {$hcPath} returned {$check}, but Root (/) is responsive ({$rootCheck}). Proceeding.", LogType::WARNING);
+                    $success = true;
+                    break;
+                }
+            }
 
+            // Test 3: Emergency override (Container is running but HTTP is slow/weird)
+            if ($app->ignore_healthcheck_warnings && $check > 0 && $check < 500) {
+                $this->streamer->log($deployment, "⚠️ App is slow/returning {$check}, but ignore_healthcheck_warnings is active. Proceeding.", LogType::WARNING);
+                $success = true;
+                break;
+            }
+
+            $this->streamer->log($deployment, "⏳ Waiting for app to become healthy... ({$attempt}/{$maxAttempts})", LogType::DEBUG);
+            sleep(3);
+        }
+        
         if (!$success) {
             $logs = $this->ssh->exec("docker logs {$appSlug} --tail 50 2>&1");
             $this->streamer->log($deployment, "📋 Last logs before failure:\n{$logs}", LogType::ERROR);
@@ -320,6 +290,11 @@ class DeploymentOrchestrator
      */
     protected function cleanup(Deployment $deployment): void
     {
+        $server = $deployment->application?->server;
+        if (!$server || $server->infrastructure_type !== 'clean') {
+            return;
+        }
+
         try {
             $this->ssh->exec("docker image prune -f");
         } catch (Exception $e) {
@@ -430,25 +405,143 @@ class DeploymentOrchestrator
     /**
      * Déploiement Legacy : Exécution directe de scripts SSH dans un dossier existant.
      */
+    /**
+     * Gère le déploiement sur une infrastructure Legacy (non-dockerisée).
+     */
     protected function deployLegacy(Application $app, Server $server, Deployment $deployment): void
     {
+        $strategy = $app->legacy_deployment_strategy ?? 'simple';
+        
+        if ($strategy === 'professional') {
+            $this->deployLegacyProfessional($app, $server, $deployment);
+        } else {
+            $this->deployLegacySimple($app, $server, $deployment);
+        }
+    }
+
+    /**
+     * Mode Simple : Déploiement direct dans le dossier cible.
+     */
+    protected function deployLegacySimple(Application $app, Server $server, Deployment $deployment): void
+    {
         $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
-        $this->streamer->log($deployment, " Connecting to VPS {$server->ip} for Legacy Deployment...", LogType::INFO);
+        $this->streamer->log($deployment, " Connecting for Legacy Simple Deployment...", LogType::INFO);
 
         $this->ssh->connect($server);
-
         $targetPath = $app->target_path;
-        $script = $app->deploy_script;
+        $targetPathEscaped = escapeshellarg($targetPath);
 
-        // Vérification de l'existence du dossier
-        $dirExists = trim($this->ssh->exec("[ -d \"{$targetPath}\" ] && echo 'yes' || echo 'no'"));
-        if ($dirExists !== 'yes') {
-            throw new \App\Exceptions\Deployment\NonRetryableException("Le dossier cible n'existe pas sur le serveur : {$targetPath}");
+        // 1. Structure
+        $this->ssh->exec("mkdir -p {$targetPathEscaped}");
+
+        // 2. .env
+        $this->streamer->log($deployment, " Synchronizing .env...", LogType::INFO);
+        $this->legacyConfig->syncConfiguration($app);
+
+        // 3. Git
+        if (!empty($app->repo_url)) {
+            $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
+            $this->git->sync($app->repo_url, $app->branch ?? 'main', $targetPath, $app->user->github_token);
         }
 
+        // 4. Script
+        $this->executeLegacyScript($app, $deployment, $targetPath);
+
+        $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
+        $this->streamer->log($deployment, " Simple deployment successful!", LogType::SUCCESS);
+        $this->ssh->disconnect();
+    }
+
+    /**
+     * Mode Professionnel : releases/current avec Zéro-Downtime.
+     */
+    protected function deployLegacyProfessional(Application $app, Server $server, Deployment $deployment): void
+    {
+        $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
+        $this->streamer->log($deployment, " Connecting for Legacy Professional Deployment...", LogType::INFO);
+
+        $this->ssh->connect($server);
+        
+        $rootPath = rtrim($app->target_path, '/');
+        $rootPathEscaped = escapeshellarg($rootPath);
+        $releasesPath = "{$rootPath}/releases";
+        $sharedPath = "{$rootPath}/shared";
+        $currentPath = "{$rootPath}/current";
+        $releaseId = date('YmdHis');
+        $releasePath = "{$releasesPath}/{$releaseId}";
+        $releasePathEscaped = escapeshellarg($releasePath);
+        $sharedPathEscaped = escapeshellarg($sharedPath);
+        $currentPathEscaped = escapeshellarg($currentPath);
+        $releasesPathEscaped = escapeshellarg($releasesPath);
+
+        // 1. Création de la structure
+        $this->streamer->log($deployment, " Preparing directory structure...", LogType::INFO);
+        $this->ssh->exec("mkdir -p {$releasesPathEscaped} {$sharedPathEscaped}");
+
+        // 2. Git Clone dans le dossier de release
+        if (!empty($app->repo_url)) {
+            $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
+            $this->streamer->log($deployment, " Cloning into release {$releaseId}...", LogType::INFO);
+            $this->git->sync($app->repo_url, $app->branch ?? 'main', $releasePath, $app->user->github_token);
+        } else {
+            $this->ssh->exec("mkdir -p \"{$releasePath}\"");
+        }
+
+        // 3. Gestion du .env (dans shared)
+        $this->streamer->log($deployment, " Synchronizing .env (shared)...", LogType::INFO);
+        // On synchronise temporairement dans le root ou directement via le service si on l'adapte
+        // Pour l'instant on réutilise le service qui écrit dans $app->target_path/.env
+        // Mais en Pro, le target_path devrait être le ROOT.
+        $this->legacyConfig->syncConfiguration($app); 
+        // On déplace vers shared et on link
+        $this->ssh->exec("mv {$rootPathEscaped}/.env {$sharedPathEscaped}/.env 2>/dev/null || true");
+        $this->ssh->exec("ln -sfn {$sharedPathEscaped}/.env {$releasePathEscaped}/.env");
+
+        // 4. Gestion des volumes persistants (Persistent Directories)
+        $this->streamer->log($deployment, " Linking persistent directories (shared)...", LogType::INFO);
+        foreach ($app->persistentVolumes as $volume) {
+            $mountPath = ltrim($volume->mount_path, '/');
+            $sharedVolPath = "{$sharedPath}/{$mountPath}";
+            $releaseVolPath = "{$releasePath}/{$mountPath}";
+
+            $sharedVolPathEscaped = escapeshellarg($sharedVolPath);
+            $releaseVolPathEscaped = escapeshellarg($releaseVolPath);
+
+            // S'assurer que le dossier partagé existe
+            $this->ssh->exec("mkdir -p {$sharedVolPathEscaped}");
+            
+            // Supprimer le dossier s'il a été cloné par Git pour pouvoir mettre le lien
+            $this->ssh->exec("rm -rf {$releaseVolPathEscaped}");
+            
+            // Créer le lien symbolique
+            $this->ssh->exec("ln -sfn {$sharedVolPathEscaped} {$releaseVolPathEscaped}");
+        }
+
+        // 5. Script d'installation/build
+        $this->executeLegacyScript($app, $deployment, $releasePath);
+
+        // 6. Switch Atomique (Zéro Downtime)
+        $this->streamer->log($deployment, " Switching to new release...", LogType::INFO);
+        $this->ssh->exec("ln -sfn {$releasePathEscaped} {$currentPathEscaped}");
+
+        // 7. Nettoyage des anciennes releases (garder les 5 dernières)
+        $this->ssh->exec("cd {$releasesPathEscaped} && ls -1t | tail -n +6 | xargs rm -rf");
+
+        $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
+        $this->streamer->log($deployment, " Professional deployment successful!", LogType::SUCCESS);
+        $this->ssh->disconnect();
+    }
+
+    /**
+     * Exécute le script personnalisé dans un dossier donné.
+     */
+    protected function executeLegacyScript(Application $app, Deployment $deployment, string $path): void
+    {
+        $script = $app->deploy_script;
+        if (empty($script)) return;
+
         $this->updateStatus($app, $deployment, DeploymentStatus::DEPLOYING);
-        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
-        $this->streamer->log($deployment, " Starting script execution in {$targetPath}", LogType::INFO);
+        $this->streamer->log($deployment, " Running custom script in {$path}...", LogType::INFO);
 
         $commands = collect(explode("\n", $script))
             ->map(fn($cmd) => trim($cmd))
@@ -456,17 +549,11 @@ class DeploymentOrchestrator
 
         foreach ($commands as $command) {
             $this->streamer->log($deployment, " $ {$command}", LogType::INFO);
-
-            $this->ssh->stream("cd \"{$targetPath}\" && {$command}", function ($line) use ($deployment) {
+            $pathEscaped = escapeshellarg($path);
+            $this->ssh->stream("cd {$pathEscaped} && {$command}", function ($line) use ($deployment) {
                 $this->streamer->log($deployment, $line, LogType::DEBUG);
             });
         }
-
-        $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
-        $this->streamer->log($deployment, "----------------------------------------", LogType::INFO);
-        $this->streamer->log($deployment, " Legacy deployment successful!", LogType::SUCCESS);
-
-        $this->cleanup($deployment);
     }
 
     /**

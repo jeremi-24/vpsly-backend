@@ -7,13 +7,13 @@ use App\Models\User;
 use App\Services\ServerKeyService;
 use Illuminate\Http\Request;
 
-use App\Services\SshService;
+use App\Services\Deployment\SSHService;
 
 class ServerController extends Controller
 {
     protected $sshService;
 
-    public function __construct(SshService $sshService)
+    public function __construct(SSHService $sshService)
     {
         $this->sshService = $sshService;
     }
@@ -41,6 +41,7 @@ class ServerController extends Controller
             'ip' => 'required|ip|unique:servers,ip',
             'ssh_user' => 'required|string|alpha_dash',
             'ssh_port' => 'required|integer|min:1|max:65535',
+            'infrastructure_type' => 'required|string|in:clean,legacy',
         ], [
             'ip.unique' => 'Ce serveur (IP) est déjà enregistré sur VPSly.'
         ]);
@@ -53,6 +54,7 @@ class ServerController extends Controller
             'ip' => $data['ip'],
             'ssh_user' => $data['ssh_user'],
             'ssh_port' => $data['ssh_port'],
+            'infrastructure_type' => $data['infrastructure_type'],
             'ssh_private_key' => $keys['private_key'],
             'status' => 'pending',
         ]);
@@ -75,7 +77,10 @@ class ServerController extends Controller
 
         try {
             $this->sshService->connect($server);
-            $server->update(['status' => 'connected']);
+            
+            $server->update([
+                'status' => 'connected',
+            ]);
             
             // Installation automatique de l'agent de monitoring en arrière-plan
             try {
@@ -160,6 +165,12 @@ class ServerController extends Controller
     public function prune(Server $server, \App\Services\Deployment\DockerService $docker)
     {
         $this->authorize('update', $server);
+
+        if ($server->infrastructure_type !== 'clean') {
+            return response()->json([
+                'error' => 'Le nettoyage (prune) n\'est disponible que pour les serveurs Docker (Clean Mode).'
+            ], 400);
+        }
 
         try {
             $output = $docker->prune($server);

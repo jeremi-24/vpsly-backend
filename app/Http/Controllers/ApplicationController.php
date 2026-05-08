@@ -29,10 +29,15 @@ class ApplicationController extends Controller
             'name' => 'required|string|unique:applications,name',
             'deployment_mode' => 'required|string|in:docker,legacy_existing',
             'repo_url' => 'required_if:deployment_mode,docker|nullable|url',
-            'branch' => 'nullable|string',
-            'domain' => 'nullable|string',
+            'branch' => 'nullable|string|regex:/^[a-zA-Z0-9\/._-]+$/',
+            'domain' => 'nullable|string|regex:/^[a-zA-Z0-9.-]+$/',
             'preset' => 'nullable|string',
-            'target_path' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'target_path' => [
+                'required_if:deployment_mode,legacy_existing',
+                'nullable',
+                'string',
+                'regex:/^(\/[a-zA-Z0-9._-]+)+$/', // Strict absolute path validation
+            ],
             'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
             'log_command' => 'nullable|string',
         ]);
@@ -46,6 +51,22 @@ class ApplicationController extends Controller
                 'message' => 'Les domaines personnalisés sont réservés aux plans Solo et Pro.',
                 'errors' => ['domain' => ['Veuillez passer au plan Solo pour utiliser un domaine personnalisé.']]
             ], 403);
+        }
+
+        // DETERMINISTIC RULE: Check server infrastructure type
+        $server = \App\Models\Server::findOrFail($request->server_id);
+        if ($server->infrastructure_type === 'legacy' && $request->deployment_mode === 'docker') {
+            return response()->json([
+                'message' => 'Ce serveur est en mode Legacy. Seul le déploiement natif (Legacy) est autorisé.',
+                'errors' => ['deployment_mode' => ['Incompatible avec l\'infrastructure du serveur.']]
+            ], 422);
+        }
+
+        if ($server->infrastructure_type === 'clean' && $request->deployment_mode === 'legacy_existing') {
+            return response()->json([
+                'message' => 'Ce serveur est en mode Clean (Docker). Le mode Legacy n\'est pas supporté.',
+                'errors' => ['deployment_mode' => ['Incompatible avec l\'infrastructure du serveur.']]
+            ], 422);
         }
 
         // Empêcher les doublons (même repo et même branche) - Uniquement pour Docker
@@ -94,10 +115,15 @@ class ApplicationController extends Controller
             'name' => 'required|string|unique:applications,name,' . $application->id,
             'deployment_mode' => 'required|string|in:docker,legacy_existing',
             'repo_url' => 'required_if:deployment_mode,docker|nullable|url',
-            'branch' => 'nullable|string',
-            'domain' => 'nullable|string',
+            'branch' => 'nullable|string|regex:/^[a-zA-Z0-9\/._-]+$/',
+            'domain' => 'nullable|string|regex:/^[a-zA-Z0-9.-]+$/',
             'preset' => 'nullable|string',
-            'target_path' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'target_path' => [
+                'required_if:deployment_mode,legacy_existing',
+                'nullable',
+                'string',
+                'regex:/^(\/[a-zA-Z0-9._-]+)+$/', // Strict absolute path validation
+            ],
             'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
             'log_command' => 'nullable|string',
         ]);
@@ -150,8 +176,12 @@ class ApplicationController extends Controller
         $user = auth()->user();
 
         // 1. Dispatch du nettoyage serveur (Avant de supprimer le modèle !)
-        // On utilise sanitized_name au lieu de slug (qui n'existe pas)
-        \App\Jobs\DeleteApplicationJob::dispatch((int)$application->server_id, (string)$application->sanitized_name);
+        \App\Jobs\DeleteApplicationJob::dispatch(
+            (int)$application->server_id,
+            (string)$application->server->infrastructure_type,
+            (string)$application->sanitized_name,
+            (string)$application->target_path
+        );
 
         // 2. Nettoyage Webhook GitHub
         if ($application->github_hook_id && $user->github_token) {

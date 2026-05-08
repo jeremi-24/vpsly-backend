@@ -50,7 +50,7 @@ class RuntimeLogService
                 'resource' => $resource->name,
                 'error' => $e->getMessage()
             ]);
-            return ["Error: Could not reach container logs."];
+            return ["Error: le conteneur n'est pas joignable"];
         }
     }
 

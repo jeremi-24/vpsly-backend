@@ -8,7 +8,9 @@ use Exception;
 
 class BlueprintService
 {
-    public function __construct(protected SSHService $ssh, protected ProxyService $proxy) {}
+    public function __construct(protected SSHService $ssh, protected ProxyService $proxy)
+    {
+    }
 
     /**
      * Génère et écrit uniquement le fichier docker-compose.yml sur le VPS.
@@ -35,7 +37,7 @@ class BlueprintService
     {
         $appSlug = $this->getSlug($app);
         $isPhp = $this->isPhp($nixpacksPlan);
-        
+
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $sslipDomain = "{$appSlug}.{$serverIp}.sslip.io";
 
@@ -52,7 +54,31 @@ class BlueprintService
         if ($isPhp) {
             // Logique Laravel/PHP
             $envVars['NIXPACKS_PHP_ROOT_DIR'] = '/app/public';
-            
+
+            // Defaults pour éviter les warnings Laravel 11+
+            $defaults = [
+                'DB_CONNECTION' => 'sqlite',
+                'DB_DATABASE' => '/app/database/database.sqlite',
+                'CACHE_STORE' => 'file',
+                'SESSION_DRIVER' => 'file',
+                'QUEUE_CONNECTION' => 'sync',
+                'REDIS_HOST' => '127.0.0.1',
+                'REDIS_PASSWORD' => 'null',
+                'REDIS_PORT' => '6379',
+                'MAIL_MAILER' => 'log',
+                'MAIL_HOST' => '127.0.0.1',
+                'MAIL_PORT' => '2525',
+                'AWS_ACCESS_KEY_ID' => '',
+                'AWS_SECRET_ACCESS_KEY' => '',
+                'AWS_DEFAULT_REGION' => 'us-east-1',
+            ];
+
+            foreach ($defaults as $key => $val) {
+                if (!isset($envVars[$key])) {
+                    $envVars[$key] = $val;
+                }
+            }
+
             // Génération automatique de APP_KEY si absente
             if (!$app->environmentVariables()->where('key', 'APP_KEY')->exists()) {
                 $envVars['APP_KEY'] = 'base64:' . base64_encode(random_bytes(32));
@@ -66,17 +92,17 @@ class BlueprintService
         // Injection des bases de données liées
         $databases = $app->databases()->with('server')->get();
         $dbTypesFound = [];
-        
+
         foreach ($databases as $db) {
             $type = $db->type;
 
             $dbTypesFound[$type] = ($dbTypesFound[$type] ?? 0) + 1;
-            
+
             // Si sur le même serveur, on utilise l'alias Docker, sinon l'IP
             $isSameServer = $db->server_id === $app->server_id;
             $host = $isSameServer ? $db->uuid : $db->server->ip;
             $port = ($type === 'mysql' || $type === 'mariadb') ? '3306' : ($type === 'redis' ? '6379' : '5432');
-            
+
             $isSecondary = $dbTypesFound[$type] > 1;
             $slugName = strtoupper(preg_replace('/[^a-z0-9]/i', '_', $db->name));
             $prefix = $isSecondary ? "{$slugName}_" : "";
@@ -100,7 +126,7 @@ class BlueprintService
                 $envVars["{$prefix}DB_DATABASE"] = $db->db_name;
                 $envVars["{$prefix}DB_USERNAME"] = $db->db_user;
                 $envVars["{$prefix}DB_PASSWORD"] = $db->db_password;
-                
+
                 $auth = "{$db->db_user}:{$db->db_password}";
                 $envVars["{$prefix}DATABASE_URL"] = "{$type}://{$auth}@{$host}:{$port}/{$db->db_name}";
             }
@@ -128,10 +154,10 @@ class BlueprintService
         $appSlug = $this->getSlug($app);
         $isPhp = $this->isPhp($nixpacksPlan);
         $containerPort = $isPhp ? 80 : 3000;
-        
+
         $serverIp = $app->server->ip ?? '127.0.0.1';
         $sslipDomain = "{$appSlug}.{$serverIp}.sslip.io";
-        
+
         // Business Rule: Starter = sslip.io only. Solo/Pro = Custom Domain allowed.
         $plan = $app->team?->plan ?? 'starter';
         $domain = ($plan === 'starter') ? $sslipDomain : ($app->domain ?: $sslipDomain);
@@ -139,6 +165,12 @@ class BlueprintService
         // Limites de ressources (Ajustées pour petit VPS)
         $cpuLimit = "0.5";
         $memoryReservation = $isPhp ? '128m' : '64m';
+
+        // Healthcheck config
+        $hcPath = $app->healthcheck_path ?: '/';
+        $hcCodes = $app->healthcheck_status_codes ?: '200,301,302,304,401,404,405';
+        $hcRegex = str_replace(',', '|', $hcCodes);
+        $hcCommand = "curl -s -o /dev/null -w \"%{http_code}\" http://localhost:{$containerPort}{$hcPath} | grep -qE \"^({$hcRegex})$\" || exit 1";
 
         $services = [
             $appSlug => [
@@ -156,11 +188,11 @@ class BlueprintService
                     "traefik.http.services.{$appSlug}.loadbalancer.server.port={$containerPort}",
                 ],
                 'healthcheck' => [
-                    'test' => ["CMD-SHELL", "curl -f http://localhost:{$containerPort}/ || exit 1"],
+                    'test' => ["CMD-SHELL", $hcCommand],
                     'interval' => '10s',
                     'timeout' => '5s',
                     'retries' => 3,
-                    'start_period' => '20s'
+                    'start_period' => '40s'
                 ],
                 'deploy' => [
                     'resources' => [

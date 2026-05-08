@@ -27,8 +27,12 @@ class Application extends BaseModel
         'deployment_mode',
         'target_path',
         'deploy_script',
+        'legacy_deployment_strategy',
         'log_command',
         'webhook_secret',
+        'healthcheck_path',
+        'healthcheck_status_codes',
+        'ignore_healthcheck_warnings',
     ];
 
     protected function casts(): array
@@ -38,6 +42,7 @@ class Application extends BaseModel
             'last_deployed_at' => 'datetime',
             'has_laravel_scheduler' => 'boolean',
             'last_cron_synced_at' => 'datetime',
+            'ignore_healthcheck_warnings' => 'boolean',
         ];
     }
 
@@ -101,6 +106,20 @@ class Application extends BaseModel
             }
             if (empty($model->webhook_secret)) {
                 $model->webhook_secret = \Illuminate\Support\Str::random(32);
+            }
+        });
+
+        static::updated(function ($model) {
+            if ($model->isDirty(['domain', 'branch', 'build_pack', 'deployment_mode'])) {
+                // On ne déclenche le déploiement que si l'application n'est pas déjà en train de déployer
+                if (!$model->is_deploying) {
+                    $deployment = $model->deployments()->create([
+                        'status' => \App\Enums\DeploymentStatus::PENDING->value,
+                        'type' => 'update',
+                    ]);
+                    
+                    \App\Jobs\DeployApplicationJob::dispatch($deployment->id);
+                }
             }
         });
     }

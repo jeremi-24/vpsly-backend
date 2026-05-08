@@ -100,9 +100,9 @@ class GitService
 
     protected function validatePath(string $path): void
     {
-
-        if (!str_starts_with($path, '/var/www/vpsly/')) {
-            throw new Exception("Chemin de déploiement non autorisé : {$path}");
+        // Allow common web paths for legacy flexibility
+        if (!str_starts_with($path, '/var/www/vpsly/') && !str_starts_with($path, '/var/www/')) {
+            throw new Exception("Chemin de déploiement non autorisé : {$path}. Le chemin doit commencer par /var/www/vpsly/ ou /var/www/");
         }
     }
 }

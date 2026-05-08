@@ -141,7 +141,9 @@ class DatabaseProvisioner
             $yml .= "      - \"traefik.enable=true\"\n";
             $serverIp = $database->server->ip;
             $yml .= "      - \"traefik.http.routers.{$adminerName}.rule=Host(`adminer-{$database->uuid}.{$serverIp}.sslip.io`)\"\n";
-            $yml .= "      - \"traefik.http.routers.{$adminerName}.entrypoints=web\"\n";
+            $yml .= "      - \"traefik.http.routers.{$adminerName}.entrypoints=web,websecure\"\n";
+            $yml .= "      - \"traefik.http.routers.{$adminerName}.tls=true\"\n";
+            $yml .= "      - \"traefik.http.routers.{$adminerName}.tls.certresolver=vpsly\"\n";
             $yml .= "      - \"traefik.http.services.{$adminerName}.loadbalancer.server.port=8080\"\n";
         }
 

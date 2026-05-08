@@ -56,29 +56,39 @@ class BackupService
 
         try {
             $type = $db->type;
+            $isLegacy = $app->server->infrastructure_type === 'legacy';
             
             if ($type === 'mysql' || $type === 'mariadb') {
-                // Approche Sidecar pour MySQL - Utilisation de MYSQL_PWD pour cacher le mot de passe de 'ps aux'
                 $dbUser = escapeshellarg($db->db_user);
                 $dbName = escapeshellarg($db->db_name);
-                $dbHost = escapeshellarg($db->uuid);
-                $dbPass = $db->db_password; // On ne l'escape pas ici car injecté dans l'env du container
+                $dbPass = $db->db_password;
                 
-                $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
-                           "-e MYSQL_PWD='{$dbPass}' " .
-                           "mysql:8.4 " .
-                           "mysqldump --no-tablespaces -h {$dbHost} -u {$dbUser} {$dbName} > {$backupPath}\"";
+                if ($isLegacy) {
+                    // Backup système natif
+                    $dumpCmd = "MYSQL_PWD='{$dbPass}' mysqldump --no-tablespaces -u {$dbUser} {$dbName} > {$backupPath}";
+                } else {
+                    // Approche Sidecar Docker
+                    $dbHost = escapeshellarg($db->uuid);
+                    $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
+                               "-e MYSQL_PWD='{$dbPass}' " .
+                               "mysql:8.4 " .
+                               "mysqldump --no-tablespaces -h {$dbHost} -u {$dbUser} {$dbName} > {$backupPath}\"";
+                }
             } else {
-                // Approche Sidecar pour Postgres
+                // Postgres
                 $dbUser = escapeshellarg($db->db_user);
                 $dbName = escapeshellarg($db->db_name);
-                $dbHost = escapeshellarg($db->uuid);
                 $dbPass = $db->db_password;
 
-                $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
-                           "-e PGPASSWORD='{$dbPass}' " .
-                           "postgres:16 " .
-                           "pg_dump -h {$dbHost} -U {$dbUser} {$dbName} > {$backupPath}\"";
+                if ($isLegacy) {
+                    $dumpCmd = "PGPASSWORD='{$dbPass}' pg_dump -U {$dbUser} {$dbName} > {$backupPath}";
+                } else {
+                    $dbHost = escapeshellarg($db->uuid);
+                    $dumpCmd = "bash -c \"docker run --rm --network vpsly " .
+                               "-e PGPASSWORD='{$dbPass}' " .
+                               "postgres:16 " .
+                               "pg_dump -h {$dbHost} -U {$dbUser} {$dbName} > {$backupPath}\"";
+                }
             }
             
             // Masquer le mot de passe dans les logs
@@ -167,11 +177,28 @@ class BackupService
 
         try {
             $hostPath = $volume->host_path;
+            $isLegacy = $app->server->infrastructure_type === 'legacy';
             
-            // Si c'est un volume nommé (pas de host_path), on utilise le chemin Docker par défaut avec le préfixe du projet
-            if (!$hostPath) {
-                $appSlug = preg_replace('/[^a-z0-9\-]/', '-', strtolower($app->name));
-                $hostPath = "/var/lib/docker/volumes/{$appSlug}_{$volume->name}/_data";
+            if ($isLegacy) {
+                if ($app->legacy_deployment_strategy === 'professional') {
+                    // En Pro, les données persistantes sont TOUJOURS dans shared
+                    $mountPath = ltrim($volume->mount_path, '/');
+                    $hostPath = rtrim($app->target_path, '/') . "/shared/{$mountPath}";
+                } else {
+                    // En Simple, on prend le host_path tel quel s'il est absolu, sinon relatif au target_path
+                    if ($hostPath && !str_starts_with($hostPath, '/')) {
+                        $hostPath = rtrim($app->target_path, '/') . '/' . ltrim($hostPath, '/');
+                    } elseif (!$hostPath) {
+                        // Fallback : mount_path relatif au target_path
+                        $hostPath = rtrim($app->target_path, '/') . '/' . ltrim($volume->mount_path, '/');
+                    }
+                }
+            } else {
+                // Si c'est un volume nommé Docker (pas de host_path), on utilise le chemin Docker par défaut
+                if (!$hostPath) {
+                    $appSlug = preg_replace('/[^a-z0-9\-]/', '-', strtolower($app->name));
+                    $hostPath = "/var/lib/docker/volumes/{$appSlug}_{$volume->name}/_data";
+                }
             }
 
             // Vérifie si le dossier existe avant
@@ -363,20 +390,25 @@ class BackupService
         $db = $backup->database;
         if (!$db) throw new \Exception("Base de données associée introuvable.");
 
+        $app = $backup->application;
+        $isLegacy = $app->server->infrastructure_type === 'legacy';
         $type = $db->type;
+        $dbUser = escapeshellarg($db->db_user);
+        $dbName = escapeshellarg($db->db_name);
+        $dbPass = $db->db_password;
 
         if ($type === 'mysql' || $type === 'mariadb') {
-             // Commande MySQL sécurisée via variable d'env pour cacher le mot de passe
-             $dbUser = escapeshellarg($db->db_user);
-             $dbName = escapeshellarg($db->db_name);
-             $dbPass = $db->db_password;
-             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i -e MYSQL_PWD='{$dbPass}' {$db->uuid} mysql --user={$dbUser} {$dbName} 2>/dev/null";
+             if ($isLegacy) {
+                 $restoreCmd = "gunzip -c {$restorePath} | MYSQL_PWD='{$dbPass}' mysql -u {$dbUser} {$dbName}";
+             } else {
+                 $restoreCmd = "gunzip -c {$restorePath} | docker exec -i -e MYSQL_PWD='{$dbPass}' {$db->uuid} mysql --user={$dbUser} {$dbName} 2>/dev/null";
+             }
         } else {
-             // Commande Postgres
-             $dbUser = escapeshellarg($db->db_user);
-             $dbName = escapeshellarg($db->db_name);
-             $dbPass = $db->db_password;
-             $restoreCmd = "gunzip -c {$restorePath} | docker exec -i -e PGPASSWORD='{$dbPass}' {$db->uuid} psql -U {$dbUser} {$dbName}";
+             if ($isLegacy) {
+                 $restoreCmd = "gunzip -c {$restorePath} | PGPASSWORD='{$dbPass}' psql -U {$dbUser} {$dbName}";
+             } else {
+                 $restoreCmd = "gunzip -c {$restorePath} | docker exec -i -e PGPASSWORD='{$dbPass}' {$db->uuid} psql -U {$dbUser} {$dbName}";
+             }
         }
 
         // Masquer le mot de passe dans les logs
@@ -391,6 +423,7 @@ class BackupService
     protected function restoreVolume(Backup $backup, string $restorePath)
     {
         $app = $backup->application;
+        $isLegacy = $app->server->infrastructure_type === 'legacy';
         
         // On essaie de retrouver le volume via le mount_path stocké dans les notes
         preg_match('/Volume: (.+)/', $backup->notes ?? '', $matches);
@@ -406,14 +439,26 @@ class BackupService
         if (!$volume) throw new \Exception("Volume persistant introuvable pour le chemin {$mountPath}.");
 
         $hostPath = $volume->host_path;
-        if (!$hostPath) {
-            $appSlug = preg_replace('/[^a-z0-9\-]/', '-', strtolower($app->name));
-            $hostPath = "/var/lib/docker/volumes/{$appSlug}_{$volume->name}/_data";
+
+        if ($isLegacy) {
+            if ($app->legacy_deployment_strategy === 'professional') {
+                $hostPath = rtrim($app->target_path, '/') . "/shared/" . ltrim($mountPath, '/');
+            } else {
+                if ($hostPath && !str_starts_with($hostPath, '/')) {
+                    $hostPath = rtrim($app->target_path, '/') . '/' . ltrim($hostPath, '/');
+                } elseif (!$hostPath) {
+                    $hostPath = rtrim($app->target_path, '/') . '/' . ltrim($mountPath, '/');
+                }
+            }
+        } else {
+            if (!$hostPath) {
+                $appSlug = preg_replace('/[^a-z0-9\-]/', '-', strtolower($app->name));
+                $hostPath = "/var/lib/docker/volumes/{$appSlug}_{$volume->name}/_data";
+            }
         }
 
-        // Restauration (on vide le dossier avant pour être propre ?)
-        // Attention: vider peut être dangereux. On va juste extraire par dessus (tar écrase par défaut).
-        $tarCmd = "tar -xzf {$restorePath} -C {$hostPath}";
+        // Restauration
+        $tarCmd = "tar -xzf {$restorePath} -C {$hostPath} .";
         Log::info("Exécution de la commande de restauration Volume: {$tarCmd}");
         $this->ssh->exec($tarCmd);
     }

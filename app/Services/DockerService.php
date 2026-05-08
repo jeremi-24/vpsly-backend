@@ -5,10 +5,11 @@ namespace App\Services;
 use App\Models\Application;
 use Exception;
 use Illuminate\Support\Facades\File;
+use App\Services\Deployment\SSHService;
 
 class DockerService
 {
-    public function __construct(protected SshService $ssh) {}
+    public function __construct(protected SSHService $ssh) {}
 
     /**
      * Détecte la stack du projet en scrutant les fichiers sources du clone.

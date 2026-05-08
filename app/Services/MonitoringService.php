@@ -6,11 +6,12 @@ use App\Models\Server;
 use App\Models\Application;
 use Illuminate\Support\Facades\Cache;
 use App\Events\ServerStatsUpdated;
+use App\Services\Deployment\SSHService;
 
 class MonitoringService
 {
     public function __construct(
-        protected SshService $ssh
+        protected SSHService $ssh
     ) {}
 
     /**

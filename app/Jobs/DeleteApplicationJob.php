@@ -19,14 +19,24 @@ class DeleteApplicationJob implements ShouldQueue
 
     public function __construct(
         public int $serverId,
-        public string $appSlug
+        public string $infrastructureType,
+        public string $appSlug,
+        public ?string $targetPath = null
     ) {}
 
-    public function handle(DockerService $docker): void
+    public function handle(DockerService $docker, \App\Services\Deployment\SSHService $ssh): void
     {
         $server = Server::find($this->serverId);
         if (!$server) return;
 
-        $docker->stopAndRemove($server, $this->appSlug);
+        if ($this->infrastructureType === 'legacy' && !empty($this->targetPath)) {
+            // Suppression du dossier pour Legacy
+            $ssh->connect($server);
+            $ssh->exec("rm -rf " . escapeshellarg($this->targetPath));
+            $ssh->disconnect();
+        } else {
+            // Suppression Docker pour Clean
+            $docker->stopAndRemove($server, $this->appSlug);
+        }
     }
 }

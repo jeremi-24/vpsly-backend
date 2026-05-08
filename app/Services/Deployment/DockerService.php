@@ -37,7 +37,8 @@ class DockerService
                 $this->ssh->exec("systemctl enable --now docker || true");
 
                 // Ajout de l'utilisateur au groupe docker pour éviter d'utiliser sudo à chaque fois
-                $this->ssh->exec("usermod -aG docker {$server->ssh_user} || true");
+                $sshUserEscaped = escapeshellarg($server->ssh_user);
+                $this->ssh->exec("usermod -aG docker {$sshUserEscaped} || true");
 
                 $this->logStreamer->log($deployment, " Docker installé et configuré avec succès.", LogType::SUCCESS);
             } catch (\Exception $e) {
@@ -82,16 +83,18 @@ class DockerService
     public function stopAndRemove(Server $server, string $appSlug): void
     {
         $appPath = "/var/www/vpsly/apps/{$appSlug}";
+        $appPathEscaped = escapeshellarg($appPath);
+        $appSlugEscaped = escapeshellarg($appSlug);
 
         $this->ssh->connect($server);
 
         // On tente d'arrêter la stack si elle existe (test du dossier d'abord)
-        $this->ssh->exec("[ -d {$appPath} ] && cd {$appPath} && docker compose down -v || true");
+        $this->ssh->exec("[ -d {$appPathEscaped} ] && cd {$appPathEscaped} && docker compose down -v || true");
 
         // Sécurité : On force la suppression du container par son nom au cas où docker-compose aurait échoué
-        $this->ssh->exec("docker rm -f {$appSlug} || true");
+        $this->ssh->exec("docker rm -f {$appSlugEscaped} || true");
 
         // On supprime le dossier de l'application
-        $this->ssh->exec("rm -rf {$appPath}");
+        $this->ssh->exec("rm -rf {$appPathEscaped}");
     }
 }

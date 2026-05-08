@@ -54,15 +54,29 @@ class CronService
     {
         $appSlug = strtolower(preg_replace('/[^a-z0-9\-]/', '-', $app->name));
         $lines = [];
+        $isLegacy = $app->deployment_mode === 'legacy_existing';
+        
+        $targetPath = $app->target_path;
+        if ($isLegacy && $app->legacy_deployment_strategy === 'professional') {
+            $targetPath = rtrim($app->target_path, '/') . '/current';
+        }
+
+        // Helper pour formater la commande selon le mode
+        $formatCmd = function($cmd) use ($isLegacy, $appSlug, $targetPath) {
+            if ($isLegacy) {
+                return "cd \"{$targetPath}\" && {$cmd}";
+            }
+            return "docker exec {$appSlug} {$cmd}";
+        };
 
         // 1. Laravel Scheduler
         if ($app->has_laravel_scheduler) {
-            $lines[] = "* * * * * docker exec {$appSlug} php artisan schedule:run >> /dev/null 2>&1";
+            $lines[] = "* * * * * " . $formatCmd("php artisan schedule:run") . " >> /dev/null 2>&1";
         }
 
         // 2. Custom Tasks
         foreach ($app->scheduledTasks()->where('is_active', true)->get() as $task) {
-            $lines[] = "{$task->frequency} docker exec {$appSlug} {$task->command} >> /dev/null 2>&1";
+            $lines[] = "{$task->frequency} " . $formatCmd($task->command) . " >> /dev/null 2>&1";
         }
 
         return $lines;

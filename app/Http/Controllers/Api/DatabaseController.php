@@ -48,6 +48,7 @@ class DatabaseController extends Controller
 
         $database = StandaloneDatabase::create([
             'uuid' => (string) Str::uuid(),
+            'team_id' => $request->user()->current_team_id,
             'type' => $validated['type'],
             'name' => $validated['name'],
             'server_id' => $server->id,
@@ -111,6 +112,31 @@ class DatabaseController extends Controller
     public function verifyIntegrity(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
     {
         $this->authorize('view', $database);
+        
+        if ($database->server->infrastructure_type === 'legacy') {
+            try {
+                $ssh->connect($database->server);
+                
+                if ($database->type === 'mysql' || $database->type === 'mariadb') {
+                    $check = $ssh->exec("sudo mysql -e \"SHOW DATABASES LIKE '{$database->db_name}';\" | grep {$database->db_name} > /dev/null 2>&1 && echo 'exists' || echo 'missing'");
+                } elseif ($database->type === 'postgres') {
+                    $check = $ssh->exec("sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw {$database->db_name} && echo 'exists' || echo 'missing'");
+                } else {
+                    $check = 'exists'; // Redis etc
+                }
+                
+                $ssh->disconnect();
+                $exists = trim($check) === 'exists';
+
+                return response()->json([
+                    'is_intact' => $exists,
+                    'message' => $exists ? 'Base de données trouvée sur le système' : 'ATTENTION: Base de données introuvable sur le système'
+                ]);
+            } catch (\Exception $e) {
+                return response()->json(['is_intact' => false, 'message' => 'Erreur de connexion: ' . $e->getMessage()], 500);
+            }
+        }
+
         $volumeName = "db-data-{$database->uuid}";
         
         try {
@@ -164,9 +190,15 @@ class DatabaseController extends Controller
     {
         $this->authorize('delete', $database);
 
+        $server = $database->server;
+
         \App\Jobs\DeleteDatabaseJob::dispatch(
             (int) $database->server_id, 
-            (string) $database->uuid
+            (string) $database->uuid,
+            (string) $server->infrastructure_type,
+            (string) $database->type,
+            (string) $database->db_name,
+            (string) $database->db_user
         );
 
         $database->delete();
@@ -179,6 +211,10 @@ class DatabaseController extends Controller
     public function stop(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
     {
         $this->authorize('update', $database);
+
+        if ($database->server->infrastructure_type === 'legacy') {
+            return response()->json(['message' => 'L\'arrêt individuel n\'est pas supporté pour les bases de données système (Legacy).'], 400);
+        }
 
         try {
             $ssh->connect($database->server);
@@ -199,6 +235,10 @@ class DatabaseController extends Controller
     public function start(StandaloneDatabase $database, \App\Services\Deployment\SSHService $ssh)
     {
         $this->authorize('update', $database);
+
+        if ($database->server->infrastructure_type === 'legacy') {
+            return response()->json(['message' => 'Le démarrage individuel n\'est pas supporté pour les bases de données système (Legacy).'], 400);
+        }
 
         try {
             $ssh->connect($database->server);

@@ -1,20 +1,26 @@
 <?php
 
-require __DIR__ . '/../vendor/autoload.php';
-$app = require_once __DIR__ . '/../bootstrap/app.php';
-$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+require 'vendor/autoload.php';
+$app = require_once 'bootstrap/app.php';
 
-use App\Models\Server;
+use App\Models\Application;
 use App\Services\Deployment\SSHService;
 
-$server = Server::first();
+$application = Application::where('name', 'vpsly-test-app')->first();
 $ssh = app(SSHService::class);
+$ssh->connect($application->server);
+
+echo "Testing health check internally...\n";
+try {
+    $output = $ssh->exec("docker exec vpsly-test-app curl -s -o /dev/null -w '%{http_code}' http://localhost:80/health");
+    echo "HTTP Status for /health: " . $output . "\n";
+} catch (\Exception $e) {
+    echo "Health check failed: " . $e->getMessage() . "\n";
+}
 
 try {
-    $ssh->connect($server);
-    echo "--- Debug portfolio1 ---\n";
-    echo "Status: " . $ssh->exec("docker inspect portfolio1 --format '{{.State.Status}}'") . "\n";
-    echo "Full Info: " . $ssh->exec("docker ps -a --filter name=portfolio1 --format 'table {{.ID}}\t{{.Names}}\t{{.Status}}'") . "\n";
+    $output = $ssh->exec("docker exec vpsly-test-app curl -s -o /dev/null -w '%{http_code}' http://localhost:80/");
+    echo "HTTP Status for /: " . $output . "\n";
 } catch (\Exception $e) {
-    echo "Error: " . $e->getMessage() . "\n";
+    echo "Root check failed: " . $e->getMessage() . "\n";
 }

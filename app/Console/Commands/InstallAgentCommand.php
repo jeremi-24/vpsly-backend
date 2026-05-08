@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Server;
-use App\Services\SshService;
+use App\Services\Deployment\SSHService;
 use Illuminate\Console\Command;
 
 class InstallAgentCommand extends Command
@@ -11,7 +11,7 @@ class InstallAgentCommand extends Command
     protected $signature = 'vpsly:agent-install {server_id}';
     protected $description = 'Installe l\'agent Go de monitoring sur le serveur distant (Compilation VPS robuste).';
 
-    public function handle(SshService $ssh)
+    public function handle(SSHService $ssh)
     {
         $serverId = $this->argument('server_id');
         $server = Server::findOrFail($serverId);

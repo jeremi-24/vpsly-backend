@@ -48,11 +48,17 @@ class MonitoringController extends Controller
         $server = $resource->server;
         $stats = $this->monitoring->getServerStats($server);
         
-        // On filtre pour ne garder que le container de la ressource
-        $containerStats = collect($stats['containers'] ?? [])->firstWhere('name', "/{$resource->uuid}");
+        // On filtre pour ne garder que le container de la ressource (si mode Clean/Docker)
+        $isLegacy = ($resource instanceof Application && $resource->deployment_mode === 'legacy_existing');
+        $containerStats = null;
+        
+        if (!$isLegacy) {
+            $containerStats = collect($stats['containers'] ?? [])->firstWhere('name', "/{$resource->uuid}");
+        }
         
         return response()->json([
             'server_id' => $server->id,
+            'is_legacy' => $isLegacy,
             'system' => [
                 'cpu_usage' => $stats['cpu_usage'] ?? 0,
                 'mem_percent' => $stats['mem_percent'] ?? 0,

@@ -6,11 +6,12 @@ use App\Models\Application;
 use App\Models\Server;
 use App\Models\Deployment;
 use Exception;
+use App\Services\Deployment\SSHService;
 
 class DeploymentService
 {
     public function __construct(
-        protected SshService $ssh,
+        protected SSHService $ssh,
         protected GitService $git,
         protected DockerService $docker,
         protected DeploymentLoggerService $logger
