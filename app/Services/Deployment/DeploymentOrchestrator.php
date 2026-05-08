@@ -387,6 +387,7 @@ class DeploymentOrchestrator
                 '-v /var/lib/vpsly/traefik/letsencrypt:/letsencrypt',
                 'traefik:v3.6',
                 '--api.insecure=true',
+                '--log.level=INFO',
                 '--providers.docker=true',
                 '--providers.docker.exposedbydefault=false',
                 '--providers.docker.network=vpsly',
