@@ -435,15 +435,19 @@ class DeploymentOrchestrator
         // 1. Structure
         $this->ssh->exec("mkdir -p {$targetPathEscaped}");
 
-        // 2. .env
-        $this->streamer->log($deployment, " Synchronizing .env...", LogType::INFO);
-        $this->legacyConfig->syncConfiguration($app);
-
-        // 3. Git
+        // 2. Git (Toujours en premier pour pouvoir importer si nouveau)
         if (!empty($app->repo_url)) {
             $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
             $this->git->sync($app->repo_url, $app->branch ?? 'main', $targetPath, $app->user->github_token);
+            
+            // TENTATIVE D'IMPORTATION (WOW effect: lit le .env ou .env.example après le clone)
+            $this->legacyConfig->importFromRemote($app, $targetPath);
         }
+
+        // 3. .env (Source of Truth - Écrase avec les variables du dashboard + importées)
+        $this->streamer->log($deployment, " Synchronizing .env...", LogType::INFO);
+        $this->legacyConfig->syncConfiguration($app);
+
 
         // 4. Script
         $this->executeLegacyScript($app, $deployment, $targetPath);
@@ -484,9 +488,13 @@ class DeploymentOrchestrator
             $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
             $this->streamer->log($deployment, " Cloning into release {$releaseId}...", LogType::INFO);
             $this->git->sync($app->repo_url, $app->branch ?? 'main', $releasePath, $app->user->github_token);
+
+            // IMPORT INITIAL DEPUIS LA RELEASE (Utile pour .env.example)
+            $this->legacyConfig->importFromRemote($app, $releasePath);
         } else {
             $this->ssh->exec("mkdir -p \"{$releasePath}\"");
         }
+
 
         // 3. Gestion du .env (dans shared)
         $this->streamer->log($deployment, " Synchronizing .env (shared)...", LogType::INFO);

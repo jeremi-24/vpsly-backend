@@ -27,7 +27,8 @@ class RuntimeLogService
      */
     public function getLastLogs($resource, int $limit = 100): array
     {
-        if ($resource instanceof Application && $resource->deployment_mode === 'legacy_existing') {
+        // CAS 1: Application Legacy
+        if ($resource instanceof Application && ($resource->server->infrastructure_type === 'legacy')) {
             if ($resource->log_command) {
                 try {
                     $output = $this->ssh->exec("cd \"{$resource->target_path}\" && {$resource->log_command}");
@@ -36,9 +37,31 @@ class RuntimeLogService
                     return ["Erreur lors de l'exécution de la commande de logs : " . $e->getMessage()];
                 }
             }
-            return ["Logs Docker non disponibles. Veuillez configurer une 'Commande de logs' (ex: pm2 logs) pour cette application Legacy."];
+            return ["Logs système non disponibles. Veuillez configurer une 'Commande de logs' (ex: tail -f storage/logs/laravel.log) pour cette application."];
         }
 
+        // CAS 2: Base de données Legacy
+        if ($resource instanceof \App\Models\StandaloneDatabase && ($resource->server->infrastructure_type === 'legacy')) {
+            $logPath = match($resource->type) {
+                'mysql', 'mariadb' => '/var/log/mysql/error.log',
+                'postgres' => '/var/log/postgresql/postgresql-*.log',
+                'redis' => '/var/log/redis/redis-server.log',
+                default => null
+            };
+
+            if ($logPath) {
+                try {
+                    // On tente de lire les logs système (peut nécessiter des droits que l'utilisateur a via sudo)
+                    $output = $this->ssh->exec("sudo tail -n {$limit} {$logPath} 2>/dev/null || echo 'Accès aux logs système restreint ou fichier introuvable ({$logPath})'");
+                    return explode("\n", trim($output));
+                } catch (\Exception $e) {
+                    return ["Impossible de lire les logs système de la base de données."];
+                }
+            }
+            return ["Logs non disponibles pour ce type de base de données en mode Legacy."];
+        }
+
+        // CAS 3: Docker (Par défaut)
         $containerName = $this->getContainerName($resource);
         $command = "docker logs --tail {$limit} {$containerName} 2>&1";
 
@@ -50,25 +73,46 @@ class RuntimeLogService
                 'resource' => $resource->name,
                 'error' => $e->getMessage()
             ]);
-            return ["Error: le conteneur n'est pas joignable"];
+            return ["Error: le conteneur n'est pas joignable ou n'existe pas en mode Docker."];
         }
     }
+
 
     /**
      * Lance un stream SSH et diffuse chaque ligne reçue via WebSockets.
      */
     public function streamLogs($resource, ?string $channelName = null): void
     {
-        if ($resource instanceof Application && $resource->deployment_mode === 'legacy_existing') {
+        // CAS 1: Application Legacy
+        if ($resource instanceof Application && ($resource->server->infrastructure_type === 'legacy')) {
             if (!$resource->log_command) {
                 Log::info("[RuntimeLog] Skipping stream for legacy application (no log command): {$resource->name}");
                 return;
             }
             $command = "cd \"{$resource->target_path}\" && {$resource->log_command}";
-        } else {
+        } 
+        // CAS 2: Base de données Legacy
+        elseif ($resource instanceof \App\Models\StandaloneDatabase && ($resource->server->infrastructure_type === 'legacy')) {
+            $logPath = match($resource->type) {
+                'mysql', 'mariadb' => '/var/log/mysql/error.log',
+                'postgres' => '/var/log/postgresql/postgresql-*.log',
+                'redis' => '/var/log/redis/redis-server.log',
+                default => null
+            };
+
+            if (!$logPath) {
+                Log::info("[RuntimeLog] No log path defined for legacy DB type: {$resource->type}");
+                return;
+            }
+            
+            $command = "sudo tail -f -n 0 {$logPath} 2>/dev/null";
+        }
+        // CAS 3: Docker (Par défaut)
+        else {
             $containerName = $this->getContainerName($resource);
             $command = "docker logs -f --tail 0 {$containerName} 2>&1";
         }
+
         
         $channelName = $channelName ?? 'application.' . $resource->id;
 

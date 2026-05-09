@@ -99,11 +99,24 @@ class ApplicationController extends Controller
             'deploy_script' => $request->deploy_script,
         ]);
 
+        $application = $result['application'];
+
+        // IMPORT INITIAL POUR LE MODE LEGACY
+        if ($application->deployment_mode === 'legacy_existing') {
+            try {
+                $imported = app(\App\Services\Deployment\LegacyConfigService::class)->importFromRemote($application);
+                \Illuminate\Support\Facades\Log::info("[AppStore] Imported {$imported} variables for Legacy App: {$application->name}");
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error("[AppStore] Failed initial .env import: " . $e->getMessage());
+            }
+        }
+
         return response()->json([
             'message' => 'Configuration terminée. Lancement du déploiement...',
-            'application' => $result['application']->load('server'),
+            'application' => $application->load('server'),
             'deployment_id' => $result['deployment']->id
         ], 201);
+
     }
 
     public function update(Request $request, Application $application)

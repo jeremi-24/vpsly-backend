@@ -11,7 +11,8 @@ use Illuminate\Support\Str;
 class DatabaseProvisioner
 {
     public function __construct(
-        protected SSHService $ssh
+        protected SSHService $ssh,
+        protected LegacyDatabaseProvisioner $legacyProvisioner
     ) {}
 
     /**
@@ -20,7 +21,15 @@ class DatabaseProvisioner
     public function provision(StandaloneDatabase $database): void
     {
         $server = $database->server;
+
+        // BRANCHEMENT ARCHITECTURAL : Clean (Docker) vs Legacy (Native)
+        if ($server->infrastructure_type === 'legacy') {
+            $this->legacyProvisioner->provision($database);
+            return;
+        }
+
         $containerName = $database->uuid;
+
         $configDir = "/var/www/vpsly/databases/{$containerName}";
 
         Log::info("[Database] Provisioning {$database->name} ({$database->image}) on Server: {$server->ip}");

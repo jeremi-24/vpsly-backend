@@ -48,23 +48,31 @@ class PresetService
         $type = $db->type;
         $dbType = ($type === 'mysql' || $type === 'mariadb') ? 'mysql' : 'postgres';
         
+        // Détermination du HOST selon l'infrastructure
+        $host = $db->uuid; // Défaut Docker
+        if ($app->server->infrastructure_type === 'legacy') {
+            $isSameServer = $db->server_id === $app->server_id;
+            $host = $isSameServer ? '127.0.0.1' : ($db->server->ip ?? '127.0.0.1');
+        }
+
+        $laravelType = ($type === 'postgres') ? 'pgsql' : $type;
+
         $vars = [
-            'DB_HOST' => $db->uuid, // On utilise l'UUID comme hostname Docker
+            'DB_CONNECTION' => $laravelType,
+            'DB_HOST' => $host,
             'DB_PORT' => $dbType === 'mysql' ? '3306' : '5432',
             'DB_DATABASE' => $db->db_name,
             'DB_USERNAME' => $db->db_user,
             'DB_PASSWORD' => $db->db_password,
         ];
 
-        if ($preset === 'laravel') {
-            $vars['DB_CONNECTION'] = ($dbType === 'postgres') ? 'pgsql' : 'mysql';
-        }
-
         foreach ($vars as $key => $value) {
             $app->environmentVariables()->updateOrCreate(
-                ['key' => $key],
+                ['key' => strtoupper($key)],
                 ['value' => $value, 'is_buildtime' => false, 'is_runtime' => true]
             );
         }
+
     }
+
 }

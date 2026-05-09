@@ -174,6 +174,9 @@ class DatabaseController extends Controller
 
         $app = \App\Models\Application::find($validated['application_id']);
         if ($app) {
+             // Utilisation du PresetService pour injecter les variables en base (Mirror Mode)
+             app(\App\Services\Deployment\PresetService::class)->linkDatabase($app, $database, $app->preset ?? 'generic');
+
              $deployment = $app->deployments()->create([
                  'status' => 'pending',
              ]);
@@ -181,9 +184,10 @@ class DatabaseController extends Controller
         }
 
         return response()->json([
-            'message' => 'Lien établi. Mise à jour de l\'application en cours...',
+            'message' => 'Lien établi. Variables injectées et déploiement lancé.',
             'database' => $database
         ]);
+
     }
 
     public function destroy(StandaloneDatabase $database)

@@ -37,6 +37,7 @@ class EnvironmentVariableController extends Controller
         ]);
 
         $this->upsertVariable($application, $data);
+        $this->syncIfLegacy($application);
 
         return response()->json(['status' => 'ok']);
     }
@@ -58,8 +59,11 @@ class EnvironmentVariableController extends Controller
             }
         });
 
+        $this->syncIfLegacy($application);
+
         return response()->json(['status' => 'ok', 'count' => count($data['variables'])]);
     }
+
 
     protected function upsertVariable(Application $application, array $data)
     {
@@ -99,8 +103,28 @@ class EnvironmentVariableController extends Controller
 
         $variable->delete();
 
+        if ($application->deployment_mode === 'legacy_existing') {
+            try {
+                app(\App\Services\Deployment\LegacyConfigService::class)->syncConfiguration($application);
+            } catch (\Exception $e) {
+                \Log::error("Legacy Sync failed after delete: " . $e->getMessage());
+            }
+        }
+
         return response()->json(['status' => 'deleted']);
     }
+
+    protected function syncIfLegacy(Application $application)
+    {
+        if ($application->deployment_mode === 'legacy_existing') {
+            try {
+                app(\App\Services\Deployment\LegacyConfigService::class)->syncConfiguration($application);
+            } catch (\Exception $e) {
+                \Log::error("Legacy Sync failed: " . $e->getMessage());
+            }
+        }
+    }
+
 
     public function reveal(Application $application, $id)
     {

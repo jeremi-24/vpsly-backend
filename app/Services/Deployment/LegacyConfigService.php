@@ -3,6 +3,7 @@
 namespace App\Services\Deployment;
 
 use App\Models\Application;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class LegacyConfigService
@@ -11,14 +12,16 @@ class LegacyConfigService
 
     /**
      * Gère la synchronisation des fichiers critiques pour le mode Legacy.
-     * Pour l'instant : uniquement le fichier .env adapté.
      */
     public function syncConfiguration(Application $app): void
     {
+        $this->ssh->connect($app->server);
+        
         $targetPath = $app->target_path;
         
         if (empty($targetPath)) {
-            throw new Exception("Target path is missing for legacy configuration sync.");
+            Log::warning("[LegacyConfig] Skipping sync: Target path is missing for App ID {$app->id}");
+            return;
         }
 
         $targetPathEscaped = escapeshellarg($targetPath);
@@ -26,79 +29,109 @@ class LegacyConfigService
         // 1. S'assurer que le dossier existe
         $this->ssh->exec("mkdir -p {$targetPathEscaped}");
 
-        // 2. Générer et écrire le .env
+        // 2. Générer et écrire le .env (Miroir strict de la base de données)
         $this->syncEnvironmentVariables($app, $targetPath);
     }
 
     /**
-     * Génère un fichier .env adapté au mode Legacy (Host natif).
+     * Importe les variables d'un fichier .env (ou .env.example) distant vers la base de données.
+     * C'est ici que VPSly "apprend" la configuration du serveur.
+     */
+    public function importFromRemote(Application $app, ?string $path = null): int
+    {
+        $this->ssh->connect($app->server);
+        $basePath = rtrim($path ?? $app->target_path, '/');
+        $remoteEnvPath = $basePath . '/.env';
+        $remoteExamplePath = $basePath . '/.env.example';
+        
+        try {
+            // Tentative de lecture du .env, fallback sur .env.example
+            $content = $this->ssh->exec("cat " . escapeshellarg($remoteEnvPath));
+            
+            if (empty(trim($content)) || str_contains($content, 'No such file or directory')) {
+                Log::info("[LegacyConfig] .env not found, trying .env.example for App {$app->id}");
+                $content = $this->ssh->exec("cat " . escapeshellarg($remoteExamplePath));
+            }
+
+            if (empty(trim($content)) || str_contains($content, 'No such file or directory')) {
+                return 0;
+            }
+
+            $lines = explode("\n", $content);
+            $importedCount = 0;
+
+            foreach ($lines as $line) {
+                $line = trim($line);
+                
+                // On ignore les commentaires et lignes vides
+                if (empty($line) || str_starts_with($line, '#')) continue;
+
+                if (str_contains($line, '=')) {
+                    [$key, $value] = explode('=', $line, 2);
+                    $key = trim($key);
+                    $value = trim($value);
+
+                    // Nettoyage des guillemets
+                    if (str_starts_with($value, '"') && str_ends_with($value, '"')) $value = substr($value, 1, -1);
+                    elseif (str_starts_with($value, "'") && str_ends_with($value, "'")) $value = substr($value, 1, -1);
+
+                    // On n'importe que si la clé n'existe pas déjà pour ne pas écraser les saisies manuelles récentes
+                    if (!empty($key) && preg_match('/^[A-Z0-9_]+$/i', $key)) {
+                        $exists = $app->environmentVariables()->where('key', strtoupper($key))->exists();
+                        
+                        if (!$exists) {
+                            $app->environmentVariables()->create([
+                                'key' => strtoupper($key),
+                                'value' => $value,
+                                'is_secret' => true
+                            ]);
+                            $importedCount++;
+                        }
+                    }
+                }
+            }
+
+            return $importedCount;
+
+        } catch (Exception $e) {
+            Log::error("[LegacyConfig] Failed to import variables for App {$app->id}: " . $e->getMessage());
+            return 0;
+        } finally {
+            $this->ssh->disconnect();
+        }
+    }
+
+    /**
+     * Génère un fichier .env qui est le REFLET EXACT de la base de données.
+     * VPSly n'injecte plus RIEN de lui-même.
      */
     protected function syncEnvironmentVariables(Application $app, string $appPath): void
     {
-        $serverIp = $app->server->ip ?? '127.0.0.1';
-        $domain = $app->domain ?: "{$app->sanitized_name}.{$serverIp}.sslip.io";
-
-        $envVars = [
-            'APP_NAME' => $app->sanitized_name,
-            'APP_ENV' => 'production',
-            'APP_URL' => "https://{$domain}",
-            'PORT' => '80',
-        ];
-
-        // Injection des bases de données
-        $databases = $app->databases()->with('server')->get();
-        $dbTypesFound = [];
+        $variables = $app->environmentVariables()->orderBy('key')->get();
         
-        foreach ($databases as $db) {
-            $type = $db->type;
-            $dbTypesFound[$type] = ($dbTypesFound[$type] ?? 0) + 1;
-            
-            $isSameServer = $db->server_id === $app->server_id;
-            $host = $isSameServer ? '127.0.0.1' : $db->server->ip;
-            
-            $port = ($type === 'mysql' || $type === 'mariadb') ? '3306' : ($type === 'redis' ? '6379' : '5432');
-            
-            $isSecondary = $dbTypesFound[$type] > 1;
-            $slugName = strtoupper(preg_replace('/[^a-z0-9]/i', '_', $db->name));
-            $prefix = $isSecondary ? "{$slugName}_" : "";
+        $content = "# >>> GENERATED BY VPSLY (Mirror Mode)\n";
+        $content .= "# Source: Dashboard Database\n";
+        $content .= "# Last Sync: " . now()->toDateTimeString() . "\n\n";
 
-            if ($type === 'redis') {
-                $envVars["{$prefix}REDIS_HOST"] = $host;
-                $envVars["{$prefix}REDIS_PORT"] = $port;
-                if ($db->db_password) {
-                    $envVars["{$prefix}REDIS_PASSWORD"] = $db->db_password;
-                    $envVars["{$prefix}REDIS_URL"] = "redis://:{$db->db_password}@{$host}:{$port}";
-                } else {
-                    $envVars["{$prefix}REDIS_URL"] = "redis://{$host}:{$port}";
-                }
+        foreach ($variables as $var) {
+            $key = strtoupper($var->key);
+            $value = $var->value ?? '';
+
+            // Protection des valeurs sensibles ou complexes
+            if (preg_match('/\s|[#$!*()]/', $value)) {
+                $content .= "{$key}=\"{$value}\"\n";
             } else {
-                $laravelType = ($type === 'postgres') ? 'pgsql' : $type;
-                $envVars["{$prefix}DB_CONNECTION"] = $laravelType;
-                $envVars["{$prefix}DB_HOST"] = $host;
-                $envVars["{$prefix}DB_PORT"] = $port;
-                $envVars["{$prefix}DB_DATABASE"] = $db->db_name;
-                $envVars["{$prefix}DB_USERNAME"] = $db->db_user;
-                $envVars["{$prefix}DB_PASSWORD"] = $db->db_password;
-                
-                $auth = "{$db->db_user}:{$db->db_password}";
-                $envVars["{$prefix}DATABASE_URL"] = "{$type}://{$auth}@{$host}:{$port}/{$db->db_name}";
+                $content .= "{$key}={$value}\n";
             }
         }
 
-        // Variables utilisateur
-        $userVars = $app->environmentVariables()->get();
-        foreach ($userVars as $var) {
-            $envVars[$var->key] = $var->value;
-        }
-
-        $content = "# Generated by VPSly (Legacy Mode)\n";
-        foreach ($envVars as $key => $value) {
-            $content .= "{$key}=\"{$value}\"\n";
-        }
-
         $this->writeAtomicRemoteFile($appPath . '/.env', $content);
+        Log::info("[LegacyConfig] .env mirror sync completed for App: {$app->name}");
     }
 
+    /**
+     * Écriture sécurisée et atomique pour éviter de corrompre le .env en cas de coupure SSH.
+     */
     protected function writeAtomicRemoteFile(string $filePath, string $content): void
     {
         $tmpPath = $filePath . '.tmp.' . bin2hex(random_bytes(8));
@@ -107,6 +140,11 @@ class LegacyConfigService
         $filePathEscaped = escapeshellarg($filePath);
         $tmpPathEscaped = escapeshellarg($tmpPath);
         
+        // MV est atomique sur Linux
         $this->ssh->exec("chmod 600 {$tmpPathEscaped} && mv {$tmpPathEscaped} {$filePathEscaped}");
+
+        // Fix permissions pour le serveur web (Legacy)
+        $this->ssh->exec("sudo chown www-data:www-data {$filePathEscaped} 2>/dev/null || true");
+        $this->ssh->exec("sudo chmod 640 {$filePathEscaped} 2>/dev/null || chmod 600 {$filePathEscaped}");
     }
 }
