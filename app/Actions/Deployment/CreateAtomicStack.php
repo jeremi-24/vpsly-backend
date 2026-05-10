@@ -36,6 +36,7 @@ class CreateAtomicStack
             'target_path' => $data['target_path'] ?? null,
             'deploy_script' => $data['deploy_script'] ?? null,
             'log_command' => $data['log_command'] ?? null,
+            'domain' => $data['domain'] ?? null,
             'status' => 'preparing',
             'build_pack' => ($data['deployment_mode'] ?? 'docker') === 'docker' ? "nixpacks:{$preset}" : 'ssh',
             'is_deploying' => true,

@@ -27,18 +27,19 @@ class ApplicationController extends Controller
         $request->validate([
             'server_id' => 'required|exists:servers,id',
             'name' => 'required|string|unique:applications,name',
-            'deployment_mode' => 'required|string|in:docker,legacy_existing',
-            'repo_url' => 'required_if:deployment_mode,docker|nullable|url',
+            'deployment_mode' => 'required|string|in:docker,legacy_existing,legacy_new',
+            'repo_url' => 'required_if:deployment_mode,docker|required_if:deployment_mode,legacy_new|nullable|url',
             'branch' => 'nullable|string|regex:/^[a-zA-Z0-9\/._-]+$/',
             'domain' => 'nullable|string|regex:/^[a-zA-Z0-9.-]+$/',
             'preset' => 'nullable|string',
             'target_path' => [
                 'required_if:deployment_mode,legacy_existing',
+                'required_if:deployment_mode,legacy_new',
                 'nullable',
                 'string',
                 'regex:/^(\/[a-zA-Z0-9._-]+)+$/', // Strict absolute path validation
             ],
-            'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'deploy_script' => 'required_if:deployment_mode,legacy_existing|required_if:deployment_mode,legacy_new|nullable|string',
             'log_command' => 'nullable|string',
         ]);
 
@@ -62,7 +63,7 @@ class ApplicationController extends Controller
             ], 422);
         }
 
-        if ($server->infrastructure_type === 'clean' && $request->deployment_mode === 'legacy_existing') {
+        if ($server->infrastructure_type === 'clean' && in_array($request->deployment_mode, ['legacy_existing', 'legacy_new'])) {
             return response()->json([
                 'message' => 'Ce serveur est en mode Clean (Docker). Le mode Legacy n\'est pas supporté.',
                 'errors' => ['deployment_mode' => ['Incompatible avec l\'infrastructure du serveur.']]
@@ -97,6 +98,7 @@ class ApplicationController extends Controller
             'preset' => $request->preset ?? 'generic',
             'target_path' => $request->target_path,
             'deploy_script' => $request->deploy_script,
+            'log_command' => $request->log_command,
         ]);
 
         $application = $result['application'];
@@ -126,18 +128,19 @@ class ApplicationController extends Controller
         $request->validate([
             'server_id' => 'required|exists:servers,id',
             'name' => 'required|string|unique:applications,name,' . $application->id,
-            'deployment_mode' => 'required|string|in:docker,legacy_existing',
-            'repo_url' => 'required_if:deployment_mode,docker|nullable|url',
+            'deployment_mode' => 'required|string|in:docker,legacy_existing,legacy_new',
+            'repo_url' => 'required_if:deployment_mode,docker|required_if:deployment_mode,legacy_new|nullable|url',
             'branch' => 'nullable|string|regex:/^[a-zA-Z0-9\/._-]+$/',
             'domain' => 'nullable|string|regex:/^[a-zA-Z0-9.-]+$/',
             'preset' => 'nullable|string',
             'target_path' => [
                 'required_if:deployment_mode,legacy_existing',
+                'required_if:deployment_mode,legacy_new',
                 'nullable',
                 'string',
                 'regex:/^(\/[a-zA-Z0-9._-]+)+$/', // Strict absolute path validation
             ],
-            'deploy_script' => 'required_if:deployment_mode,legacy_existing|nullable|string',
+            'deploy_script' => 'required_if:deployment_mode,legacy_existing|required_if:deployment_mode,legacy_new|nullable|string',
             'log_command' => 'nullable|string',
         ]);
 
@@ -152,19 +155,29 @@ class ApplicationController extends Controller
         }
 
         $application->update([
-            'name' => $request->name,
-            'repo_url' => $request->repo_url,
-            'branch' => $request->branch ?? 'main',
-            'server_id' => $request->server_id,
-            'domain' => $request->domain,
-            'preset' => $request->preset ?? 'generic',
-            'target_path' => $request->target_path,
-            'deploy_script' => $request->deploy_script,
-            'log_command' => $request->log_command,
+            'name' => $request->name ?? $application->name,
+            'repo_url' => $request->has('repo_url') ? $request->repo_url : $application->repo_url,
+            'branch' => $request->branch ?? $application->branch ?? 'main',
+            'server_id' => $request->server_id ?? $application->server_id,
+            'domain' => $request->has('domain') ? $request->domain : $application->domain,
+            'deployment_mode' => $request->deployment_mode ?? $application->deployment_mode,
+            'preset' => $request->preset ?? $application->preset ?? 'generic',
+            'target_path' => $request->has('target_path') ? $request->target_path : $application->target_path,
+            'deploy_script' => $request->has('deploy_script') ? $request->deploy_script : $application->deploy_script,
+            'log_command' => $request->has('log_command') ? $request->log_command : $application->log_command,
         ]);
 
+        // Déclencher un redéploiement automatique après modification
+        try {
+            \App\Jobs\RunDeploymentJob::dispatch($application);
+            $message = "Application mise à jour et redéploiement lancé.";
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("Failed to auto-deploy after update: " . $e->getMessage());
+            $message = "Application mise à jour, mais le redéploiement n'a pas pu être lancé.";
+        }
+
         return response()->json([
-            'message' => 'Application mise à jour avec succès.',
+            'message' => $message,
             'application' => $application->load('server')
         ]);
     }
@@ -188,27 +201,35 @@ class ApplicationController extends Controller
 
         $user = auth()->user();
 
-        // 1. Dispatch du nettoyage serveur (Avant de supprimer le modèle !)
+        // 1. Nettoyage des Bases de Données associées
+        foreach ($application->databases as $db) {
+            \App\Jobs\DeleteDatabaseJob::dispatch(
+                (int)$application->server_id,
+                (string)$db->uuid,
+                (string)$application->server->infrastructure_type,
+                (string)$db->type,
+                (string)$db->db_name,
+                (string)$db->db_user
+            );
+            $db->delete();
+        }
+
+        // 2. Dispatch du nettoyage serveur (Avant de supprimer le modèle !)
         \App\Jobs\DeleteApplicationJob::dispatch(
             (int)$application->server_id,
             (string)$application->server->infrastructure_type,
             (string)$application->sanitized_name,
-            (string)$application->target_path
+            (string)$application->target_path,
+            (string)$application->domain
         );
 
-        // 2. Nettoyage Webhook GitHub
+        // 3. Nettoyage Webhook GitHub (Asynchrone)
         if ($application->github_hook_id && $user->github_token) {
-            try {
-                $urlPath = parse_url($application->repo_url, PHP_URL_PATH);
-                $parts = explode('/', trim($urlPath, '/'));
-                if (count($parts) >= 2) {
-                    $owner = $parts[0];
-                    $repo = str_replace('.git', '', $parts[1]);
-                    $github->deleteWebhook($user, $owner, $repo, (int)$application->github_hook_id);
-                }
-            } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::warning("Échec suppression webhook : " . $e->getMessage());
-            }
+            \App\Jobs\DeleteGitHubWebhookJob::dispatch(
+                (int)$user->id,
+                (string)$application->repo_url,
+                (int)$application->github_hook_id
+            );
         }
 
         $application->delete();

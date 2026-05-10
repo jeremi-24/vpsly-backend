@@ -28,6 +28,7 @@ class Application extends BaseModel
         'target_path',
         'deploy_script',
         'legacy_deployment_strategy',
+        'nginx_configured',
         'log_command',
         'webhook_secret',
         'healthcheck_path',
@@ -43,6 +44,7 @@ class Application extends BaseModel
             'has_laravel_scheduler' => 'boolean',
             'last_cron_synced_at' => 'datetime',
             'ignore_healthcheck_warnings' => 'boolean',
+            'nginx_configured' => 'boolean',
         ];
     }
 

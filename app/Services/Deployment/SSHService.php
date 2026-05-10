@@ -42,8 +42,8 @@ class SSHService
         ];
 
         
-        // Reset timeout pour les commandes potentiellement longues
-        $this->ssh->setTimeout(0);
+        // Timeout par défaut pour éviter de bloquer PHP-FPM (15s)
+        $this->ssh->setTimeout(15);
 
         return $this;
     }

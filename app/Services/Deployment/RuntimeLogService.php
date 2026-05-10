@@ -31,7 +31,9 @@ class RuntimeLogService
         if ($resource instanceof Application && ($resource->server->infrastructure_type === 'legacy')) {
             if ($resource->log_command) {
                 try {
-                    $output = $this->ssh->exec("cd \"{$resource->target_path}\" && {$resource->log_command}");
+                    // On retire le flag -f (follow) pour s'assurer que la commande s'arrête
+                    $safeCommand = str_replace('-f', '-n ' . $limit, $resource->log_command);
+                    $output = $this->ssh->exec("cd \"{$resource->target_path}\" && {$safeCommand}");
                     return explode("\n", trim($output));
                 } catch (\Exception $e) {
                     return ["Erreur lors de l'exécution de la commande de logs : " . $e->getMessage()];

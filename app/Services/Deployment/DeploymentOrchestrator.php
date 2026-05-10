@@ -20,6 +20,7 @@ class DeploymentOrchestrator
         protected NixpacksService $nixpacks,
         protected BlueprintService $blueprint,
         protected LegacyConfigService $legacyConfig,
+        protected LegacyProvisionerService $provisioner,
         protected LogStreamer $streamer,
         protected CronService $cron
     ) {
@@ -411,13 +412,12 @@ class DeploymentOrchestrator
      */
     protected function deployLegacy(Application $app, Server $server, Deployment $deployment): void
     {
-        $strategy = $app->legacy_deployment_strategy ?? 'simple';
-        
-        if ($strategy === 'professional') {
-            $this->deployLegacyProfessional($app, $server, $deployment);
-        } else {
-            $this->deployLegacySimple($app, $server, $deployment);
+        if ($app->deployment_mode === 'legacy_new') {
+            $this->deployLegacyNew($app, $server, $deployment);
+            return;
         }
+
+        $this->deployLegacySimple($app, $server, $deployment);
     }
 
     /**
@@ -454,6 +454,66 @@ class DeploymentOrchestrator
 
         $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
         $this->streamer->log($deployment, " Simple deployment successful!", LogType::SUCCESS);
+        $this->ssh->disconnect();
+    }
+
+    /**
+     * Mode Legacy New : Déploiement automatisé avec Nixpacks + Nginx + Certbot.
+     */
+    protected function deployLegacyNew(Application $app, Server $server, Deployment $deployment): void
+    {
+        $this->updateStatus($app, $deployment, DeploymentStatus::PREPARING);
+        $this->streamer->log($deployment, " Starting Automated Legacy Deployment...", LogType::INFO);
+
+        $this->ssh->connect($server);
+        $targetPath = $app->target_path;
+        $targetPathEscaped = escapeshellarg($targetPath);
+
+        // 1. Structure
+        $this->ssh->exec("mkdir -p {$targetPathEscaped}");
+
+        // 2. Git
+        $this->updateStatus($app, $deployment, DeploymentStatus::CLONING);
+        $this->git->sync($app->repo_url, $app->branch ?? 'main', $targetPath, $app->user->github_token);
+
+        // 3. Nixpacks Detection (Nouveau)
+        $this->streamer->log($deployment, " Analyzing project stack with Nixpacks...", LogType::INFO);
+        $stack = $this->provisioner->detectStack($app, $targetPath);
+        $this->streamer->log($deployment, " Stack detected: {$stack}", LogType::SUCCESS);
+
+        // 4. .env (Import from .env.example first if new)
+        if (!$app->nginx_configured) {
+            $this->legacyConfig->importFromRemote($app, $targetPath);
+        }
+        $this->streamer->log($deployment, " Synchronizing .env...", LogType::INFO);
+        $this->legacyConfig->syncConfiguration($app);
+
+        // 5. Script (Build)
+        $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
+        $this->executeLegacyScript($app, $deployment, $targetPath);
+
+        // 6. Health Check Local (Sauf PHP)
+        if ($stack !== 'php') {
+            $this->streamer->log($deployment, " Running local health check...", LogType::INFO);
+            $isHealthy = $this->provisioner->localHealthCheck($app, $stack);
+            if (!$isHealthy) {
+                throw new Exception("Local health check failed. Check your app logs.");
+            }
+        }
+
+        // 7. Nginx & SSL (Uniquement si pas encore configuré)
+        if (!$app->nginx_configured) {
+            $this->streamer->log($deployment, " Provisioning Nginx & SSL...", LogType::INFO);
+            $this->provisioner->provisionWebserver($app, $stack);
+            $app->update(['nginx_configured' => true]);
+        }
+
+        // 8. Health Check Final
+        $this->streamer->log($deployment, " Verifying final deployment...", LogType::INFO);
+        $this->provisioner->finalHealthCheck($app);
+
+        $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
+        $this->streamer->log($deployment, " Automated deployment successful!", LogType::SUCCESS);
         $this->ssh->disconnect();
     }
 
@@ -554,7 +614,8 @@ class DeploymentOrchestrator
 
         $commands = collect(explode("\n", $script))
             ->map(fn($cmd) => trim($cmd))
-            ->filter(fn($cmd) => !empty($cmd) && !str_starts_with($cmd, '#'));
+            ->filter(fn($cmd) => !empty($cmd) && !str_starts_with($cmd, '#'))
+            ->map(fn($cmd) => $this->optimizePm2Command($cmd));
 
         foreach ($commands as $command) {
             $this->streamer->log($deployment, " $ {$command}", LogType::INFO);
@@ -563,6 +624,30 @@ class DeploymentOrchestrator
                 $this->streamer->log($deployment, $line, LogType::DEBUG);
             });
         }
+    }
+
+    /**
+     * Optimise silencieusement les commandes PM2 pour éviter les doublons.
+     * Pattern: pm2 describe NAME && pm2 restart NAME || pm2 start ...
+     */
+    protected function optimizePm2Command(string $command): string
+    {
+        if (
+            str_contains($command, 'pm2 start') &&
+            str_contains($command, '--name') &&
+            !str_contains($command, 'pm2 describe') &&
+            !str_contains($command, 'pm2 restart') &&
+            !str_contains($command, 'pm2 reload') &&
+            !str_contains($command, 'pm2 delete')
+        ) {
+            // Extraction du nom avec support quotes
+            if (preg_match('/--name\s+["\']?([^"\s\']+)["\']?/', $command, $matches)) {
+                $name = escapeshellarg($matches[1]);
+                return "pm2 describe {$name} > /dev/null 2>&1 && pm2 restart {$name} || {$command}";
+            }
+        }
+
+        return $command;
     }
 
     /**

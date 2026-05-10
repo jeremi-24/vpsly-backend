@@ -23,7 +23,6 @@ class DeploymentLogEvent implements ShouldBroadcastNow
     {
         return [
             new PrivateChannel('deployment.' . $this->deploymentId),
-            new Channel('deployment.' . $this->deploymentId), // Utilisation de Channel public pour la simplification MVP Reverb si besoin, à adapter pour auth.
         ];
     }
 }

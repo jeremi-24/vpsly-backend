@@ -21,7 +21,8 @@ class DeleteApplicationJob implements ShouldQueue
         public int $serverId,
         public string $infrastructureType,
         public string $appSlug,
-        public ?string $targetPath = null
+        public ?string $targetPath = null,
+        public ?string $domain = null
     ) {}
 
     public function handle(DockerService $docker, \App\Services\Deployment\SSHService $ssh): void
@@ -30,8 +31,43 @@ class DeleteApplicationJob implements ShouldQueue
         if (!$server) return;
 
         if ($this->infrastructureType === 'legacy' && !empty($this->targetPath)) {
-            // Suppression du dossier pour Legacy
+            // 1. Suppression du processus PM2 si présent (Node/Next apps)
             $ssh->connect($server);
+            $ssh->exec("pm2 delete " . escapeshellarg($this->appSlug) . " && pm2 save || true");
+
+            // 2. Suppression de la config Nginx si présente
+            $cleanupDomain = $this->domain;
+            if (empty($cleanupDomain)) {
+                // Reconstruire le domaine sslip.io par défaut si vide
+                $server = Server::find($this->serverId);
+                if ($server) {
+                    $cleanupDomain = "{$this->appSlug}.{$server->ip}.sslip.io";
+                }
+            }
+
+            if (!empty($cleanupDomain)) {
+                $safeName = str_replace('.', '_', $cleanupDomain);
+                
+                // Liste des patterns possibles pour être sûr de tout supprimer
+                $possibleFiles = [
+                    "{$safeName}.vpsly.conf", // Nouveau format
+                    "{$cleanupDomain}.vpsly.conf", // Format hybride
+                    "{$cleanupDomain}" // Ancien format / manuel
+                ];
+
+                foreach ($possibleFiles as $file) {
+                    $configPath = "/etc/nginx/sites-available/{$file}";
+                    $enabledPath = "/etc/nginx/sites-enabled/{$file}";
+                    $ssh->exec("sudo rm -f {$enabledPath} {$configPath}");
+                }
+                
+                // Nettoyage optionnel des restes de Certbot si présent
+                $ssh->exec("sudo rm -rf /etc/letsencrypt/live/{$cleanupDomain} /etc/letsencrypt/archive/{$cleanupDomain} /etc/letsencrypt/renewal/{$cleanupDomain}.conf || true");
+                
+                $ssh->exec("sudo systemctl reload nginx");
+            }
+
+            // 3. Suppression du dossier pour Legacy
             $ssh->exec("rm -rf " . escapeshellarg($this->targetPath));
             $ssh->disconnect();
         } else {
