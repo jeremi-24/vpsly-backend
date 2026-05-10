@@ -448,12 +448,21 @@ class DeploymentOrchestrator
         $this->streamer->log($deployment, " Synchronizing .env...", LogType::INFO);
         $this->legacyConfig->syncConfiguration($app);
 
+        // 3.5 Auto-bootstrap Laravel (APP_KEY) — Détection simplifiée
+        $hasArtisan = !str_contains(
+            $this->ssh->exec("test -f " . escapeshellarg($targetPath . '/artisan') . " && echo 'yes' || echo 'no'"),
+            'no'
+        );
+        if ($hasArtisan) {
+            $this->bootstrapLaravel($app, $deployment, $targetPath);
+        }
 
         // 4. Script
         $this->executeLegacyScript($app, $deployment, $targetPath);
 
         // 5. Fix Permissions (Auto-pilot for PHP/Laravel)
-        $this->provisioner->fixPermissions($app, 'php'); // On force PHP si c'est Simple/Laravel
+        $stack = $hasArtisan ? 'php' : 'generic';
+        $this->provisioner->fixPermissions($app, $stack);
 
         $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
         $this->streamer->log($deployment, " Simple deployment successful!", LogType::SUCCESS);
@@ -486,10 +495,17 @@ class DeploymentOrchestrator
 
         // 4. .env (Import from .env.example first if new)
         if (!$app->nginx_configured) {
-            $this->legacyConfig->importFromRemote($app, $targetPath);
+            $this->streamer->log($deployment, " Importing environment variables...", LogType::INFO);
+            $imported = $this->legacyConfig->importFromRemote($app, $targetPath);
+            $this->streamer->log($deployment, " Imported {$imported} variables from remote.", LogType::INFO);
         }
         $this->streamer->log($deployment, " Synchronizing .env...", LogType::INFO);
         $this->legacyConfig->syncConfiguration($app);
+
+        // 4.5 Auto-bootstrap Laravel (APP_KEY)
+        if ($stack === 'php') {
+            $this->bootstrapLaravel($app, $deployment, $targetPath);
+        }
 
         // 5. Script (Build)
         $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
@@ -675,6 +691,46 @@ class DeploymentOrchestrator
     {
         $jsonStr = strtolower(json_encode($plan));
         return str_contains($jsonStr, $keyword);
+    }
+
+    /**
+     * Auto-bootstrap Laravel : génère APP_KEY si manquant et re-sync.
+     * Résout le crash "No application encryption key has been specified".
+     */
+    protected function bootstrapLaravel(Application $app, Deployment $deployment, string $targetPath): void
+    {
+        $pathEscaped = escapeshellarg($targetPath);
+
+        // 1. Vérifier si APP_KEY est vide ou manquant dans la DB VPSly
+        $appKey = $app->environmentVariables()->where('key', 'APP_KEY')->first();
+        $keyValue = $appKey?->value ?? '';
+
+        if (!empty($keyValue) && str_starts_with($keyValue, 'base64:')) {
+            // APP_KEY déjà valide, rien à faire
+            return;
+        }
+
+        $this->streamer->log($deployment, " Generating Laravel APP_KEY...", LogType::INFO);
+
+        // 2. Générer la clé directement sur le serveur
+        $output = $this->ssh->exec("cd {$pathEscaped} && php artisan key:generate --show 2>&1");
+        $generatedKey = trim($output);
+
+        if (!str_starts_with($generatedKey, 'base64:')) {
+            $this->streamer->log($deployment, "⚠️ APP_KEY generation returned unexpected output: {$generatedKey}", LogType::WARNING);
+            return;
+        }
+
+        // 3. Sauvegarder dans la DB VPSly
+        $app->environmentVariables()->updateOrCreate(
+            ['key' => 'APP_KEY'],
+            ['value' => $generatedKey, 'is_secret' => true]
+        );
+
+        // 4. Re-sync le .env sur le serveur (avec la nouvelle clé)
+        $this->legacyConfig->syncConfiguration($app);
+
+        $this->streamer->log($deployment, " APP_KEY generated and synchronized.", LogType::SUCCESS);
     }
 }
 
