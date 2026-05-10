@@ -489,53 +489,53 @@ class DeploymentOrchestrator
         $this->git->sync($app->repo_url, $app->branch ?? 'main', $targetPath, $app->user->github_token);
 
         // 3. Nixpacks Detection (Nouveau)
-        $this->streamer->log($deployment, " Analyzing project stack with Nixpacks...", LogType::INFO);
+        $this->streamer->log($deployment, " Analyze du projet...", LogType::INFO);
         $stack = $this->provisioner->detectStack($app, $targetPath);
-        $this->streamer->log($deployment, " Stack detected: {$stack}", LogType::SUCCESS);
+        $this->streamer->log($deployment, " Stack detecté: {$stack}", LogType::SUCCESS);
 
         // 4. .env (Import from .env.example first if new)
         if (!$app->nginx_configured) {
-            $this->streamer->log($deployment, " Importing environment variables...", LogType::INFO);
+            $this->streamer->log($deployment, " Importation de .env...", LogType::INFO);
             $imported = $this->legacyConfig->importFromRemote($app, $targetPath);
             $this->streamer->log($deployment, " Imported {$imported} variables from remote.", LogType::INFO);
         }
-        $this->streamer->log($deployment, " Synchronizing .env...", LogType::INFO);
+        $this->streamer->log($deployment, " Synchronisation du  .env...", LogType::INFO);
         $this->legacyConfig->syncConfiguration($app);
-
-        // 4.5 Auto-bootstrap Laravel (APP_KEY)
-        if ($stack === 'php') {
-            $this->bootstrapLaravel($app, $deployment, $targetPath);
-        }
 
         // 5. Script (Build)
         $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
         $this->executeLegacyScript($app, $deployment, $targetPath);
 
-        // 5.5 Fix Permissions (Auto-pilot for PHP/Laravel)
+        // 5.5 Auto-bootstrap Laravel (APP_KEY) - AFTER script to ensure vendor exists
+        if ($stack === 'php') {
+            $this->bootstrapLaravel($app, $deployment, $targetPath);
+        }
+
+        // 5.6 Fix Permissions (Auto-pilot for PHP/Laravel)
         $this->provisioner->fixPermissions($app, $stack);
 
         // 6. Health Check Local (Sauf PHP)
         if ($stack !== 'php') {
-            $this->streamer->log($deployment, " Running local health check...", LogType::INFO);
+            $this->streamer->log($deployment, " Test de santé local...", LogType::INFO);
             $isHealthy = $this->provisioner->localHealthCheck($app, $stack);
             if (!$isHealthy) {
-                throw new Exception("Local health check failed. Check your app logs.");
+                throw new Exception("Le test de santé local a échoué. Vérifiez les logs.");
             }
         }
 
         // 7. Nginx & SSL (Uniquement si pas encore configuré)
         if (!$app->nginx_configured) {
-            $this->streamer->log($deployment, " Provisioning Nginx & SSL...", LogType::INFO);
+            $this->streamer->log($deployment, " Configuration du Nginx & SSL...", LogType::INFO);
             $this->provisioner->provisionWebserver($app, $stack);
             $app->update(['nginx_configured' => true]);
         }
 
         // 8. Health Check Final
-        $this->streamer->log($deployment, " Verifying final deployment...", LogType::INFO);
+        $this->streamer->log($deployment, " Vérification du déploiement final...", LogType::INFO);
         $this->provisioner->finalHealthCheck($app);
 
         $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
-        $this->streamer->log($deployment, " Automated deployment successful!", LogType::SUCCESS);
+        $this->streamer->log($deployment, " Déploiement réussi!", LogType::SUCCESS);
         $this->ssh->disconnect();
     }
 
@@ -610,6 +610,9 @@ class DeploymentOrchestrator
 
         // 5. Script d'installation/build
         $this->executeLegacyScript($app, $deployment, $releasePath);
+
+        // 5.1 Auto-bootstrap Laravel (APP_KEY)
+        $this->bootstrapLaravel($app, $deployment, $releasePath);
 
         // 5.5 Fix Permissions (Auto-pilot for PHP/Laravel)
         $this->provisioner->fixPermissions($app, 'php'); // On force pour l'instant
