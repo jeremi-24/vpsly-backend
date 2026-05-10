@@ -56,7 +56,7 @@ class DatabaseController extends Controller
             'db_user' => $validated['db_user'] ?? ($validated['type'] === 'redis' ? null : 'vpsly'),
             'db_password' => $validated['db_password'] ?? Str::random(16),
             'db_name' => $validated['db_name'] ?? ($validated['type'] === 'redis' ? null : 'vpsly'),
-            'has_adminer' => $validated['has_adminer'] ?? false,
+            'has_adminer' => $server->infrastructure_type === 'legacy' ? false : ($validated['has_adminer'] ?? false),
             'status' => 'creating',
         ]);
 
