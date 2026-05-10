@@ -452,6 +452,9 @@ class DeploymentOrchestrator
         // 4. Script
         $this->executeLegacyScript($app, $deployment, $targetPath);
 
+        // 5. Fix Permissions (Auto-pilot for PHP/Laravel)
+        $this->provisioner->fixPermissions($app, 'php'); // On force PHP si c'est Simple/Laravel
+
         $this->updateStatus($app, $deployment, DeploymentStatus::SUCCESS);
         $this->streamer->log($deployment, " Simple deployment successful!", LogType::SUCCESS);
         $this->ssh->disconnect();
@@ -491,6 +494,9 @@ class DeploymentOrchestrator
         // 5. Script (Build)
         $this->updateStatus($app, $deployment, DeploymentStatus::BUILDING);
         $this->executeLegacyScript($app, $deployment, $targetPath);
+
+        // 5.5 Fix Permissions (Auto-pilot for PHP/Laravel)
+        $this->provisioner->fixPermissions($app, $stack);
 
         // 6. Health Check Local (Sauf PHP)
         if ($stack !== 'php') {
@@ -589,6 +595,9 @@ class DeploymentOrchestrator
         // 5. Script d'installation/build
         $this->executeLegacyScript($app, $deployment, $releasePath);
 
+        // 5.5 Fix Permissions (Auto-pilot for PHP/Laravel)
+        $this->provisioner->fixPermissions($app, 'php'); // On force pour l'instant
+
         // 6. Switch Atomique (Zéro Downtime)
         $this->streamer->log($deployment, " Switching to new release...", LogType::INFO);
         $this->ssh->exec("ln -sfn {$releasePathEscaped} {$currentPathEscaped}");
@@ -617,12 +626,21 @@ class DeploymentOrchestrator
             ->filter(fn($cmd) => !empty($cmd) && !str_starts_with($cmd, '#'))
             ->map(fn($cmd) => $this->optimizePm2Command($cmd));
 
-        foreach ($commands as $command) {
-            $this->streamer->log($deployment, " $ {$command}", LogType::INFO);
-            $pathEscaped = escapeshellarg($path);
-            $this->ssh->stream("cd {$pathEscaped} && {$command}", function ($line) use ($deployment) {
-                $this->streamer->log($deployment, $line, LogType::DEBUG);
-            });
+        // Augmenter le timeout pour les scripts qui peuvent être longs (ex: build npm)
+        $oldTimeout = $this->ssh->getTimeout();
+        $this->ssh->setTimeout(300); // 5 minutes par commande
+
+        try {
+            foreach ($commands as $command) {
+                $this->streamer->log($deployment, " $ {$command}", LogType::INFO);
+                $pathEscaped = escapeshellarg($path);
+                $this->ssh->stream("cd {$pathEscaped} && {$command}", function ($line) use ($deployment) {
+                    $this->streamer->log($deployment, $line, LogType::DEBUG);
+                });
+            }
+        } finally {
+            // Restaurer le timeout d'origine
+            $this->ssh->setTimeout($oldTimeout);
         }
     }
 

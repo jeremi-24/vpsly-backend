@@ -107,6 +107,10 @@ class NixpacksService
         Log::info("[Nixpacks] Running build: {$command}");
 
         try {
+            // Augmenter le timeout pour le build (peut être très long)
+            $oldTimeout = $this->ssh->getTimeout();
+            $this->ssh->setTimeout(600); // 10 minutes pour le build Nixpacks
+
             $lastLines = [];
             $this->ssh->stream($command, function ($line) use ($deployment, &$lastLines) {
                 $this->logStreamer->log($deployment, $line, \App\Enums\LogType::DEBUG);
@@ -115,8 +119,14 @@ class NixpacksService
                     array_shift($lastLines);
             });
 
+            // Restaurer le timeout
+            $this->ssh->setTimeout($oldTimeout);
+
             $this->logStreamer->log($deployment, "📦 Image Docker buildée avec succès : {$imageName}", \App\Enums\LogType::SUCCESS);
         } catch (\Exception $e) {
+            // S'assurer de restaurer le timeout même en cas d'échec
+            if (isset($oldTimeout)) $this->ssh->setTimeout($oldTimeout);
+            
             $context = implode("\n", $lastLines);
             $this->logStreamer->log($deployment, "❌ Échec du build Nixpacks. Dernières lignes :\n{$context}", \App\Enums\LogType::ERROR);
             throw $e;

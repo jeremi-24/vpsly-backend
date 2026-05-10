@@ -49,6 +49,24 @@ class SSHService
     }
 
     /**
+     * Définit le timeout de la connexion SSH.
+     */
+    public function setTimeout(int $seconds): void
+    {
+        if ($this->ssh) {
+            $this->ssh->setTimeout($seconds);
+        }
+    }
+
+    /**
+     * Récupère le timeout actuel.
+     */
+    public function getTimeout(): int
+    {
+        return $this->ssh ? $this->ssh->getTimeout() : 0;
+    }
+
+    /**
      * Exécute une commande de manière synchrone et retourne l'output.
      */
     public function exec(string $command): string

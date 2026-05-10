@@ -169,7 +169,19 @@ class ApplicationController extends Controller
 
         // Déclencher un redéploiement automatique après modification
         try {
-            \App\Jobs\RunDeploymentJob::dispatch($application);
+            // 1. Marquer l'application en cours de déploiement
+            $application->update(['is_deploying' => true]);
+
+            // 2. Créer l'enregistrement de déploiement
+            $deployment = \App\Models\Deployment::create([
+                'application_id' => $application->id,
+                'status' => 'pending',
+                'started_at' => now(),
+            ]);
+
+            // 3. Lancer le Job avec l'ID du déploiement (int)
+            \App\Jobs\DeployApplicationJob::dispatch($deployment->id);
+            
             $message = "Application mise à jour et redéploiement lancé.";
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error("Failed to auto-deploy after update: " . $e->getMessage());

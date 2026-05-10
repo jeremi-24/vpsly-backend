@@ -167,6 +167,29 @@ class LegacyProvisionerService
         return trim($output) ?: '8.3';
     }
 
+    /**
+     * Fixe les permissions pour la stack spécifique (ex: www-data pour PHP).
+     */
+    public function fixPermissions(Application $app, string $stack): void
+    {
+        if ($stack !== 'php') return;
+
+        $path = $app->target_path;
+        $pathEscaped = escapeshellarg($path);
+
+        Log::info("[Provisioner] Fixing PHP permissions for {$path}");
+
+        // 1. S'assurer que les dossiers Laravel critiques existent
+        $this->ssh->exec("mkdir -p {$pathEscaped}/storage {$pathEscaped}/bootstrap/cache");
+        $this->ssh->exec("touch {$pathEscaped}/storage/logs/laravel.log");
+
+        // 2. Fixer l'ownership à www-data
+        $this->ssh->exec("sudo chown -R www-data:www-data {$pathEscaped}/storage {$pathEscaped}/bootstrap/cache");
+
+        // 3. Fixer les permissions (775 pour permettre au groupe d'écrire)
+        $this->ssh->exec("sudo chmod -R 775 {$pathEscaped}/storage {$pathEscaped}/bootstrap/cache");
+    }
+
     protected function getStackDefaultPort(string $stack): int
     {
         return match ($stack) {
