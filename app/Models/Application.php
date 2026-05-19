@@ -36,16 +36,27 @@ class Application extends BaseModel
         'ignore_healthcheck_warnings',
     ];
 
-    protected function casts(): array
+    protected $casts = [
+        'is_deploying' => 'boolean',
+        'last_deployed_at' => 'datetime',
+        'has_laravel_scheduler' => 'boolean',
+        'last_cron_synced_at' => 'datetime',
+        'ignore_healthcheck_warnings' => 'boolean',
+        'nginx_configured' => 'boolean',
+    ];
+
+    protected $appends = ['app_url'];
+
+    public function getAppUrlAttribute()
     {
-        return [
-            'is_deploying' => 'boolean',
-            'last_deployed_at' => 'datetime',
-            'has_laravel_scheduler' => 'boolean',
-            'last_cron_synced_at' => 'datetime',
-            'ignore_healthcheck_warnings' => 'boolean',
-            'nginx_configured' => 'boolean',
-        ];
+        if ($this->domain) {
+            return $this->domain;
+        }
+
+        $sanitizedAppName = strtolower(str_replace('_', '-', $this->name));
+        $serverIp = $this->server?->ip ?? '0.0.0.0';
+
+        return "{$sanitizedAppName}.{$serverIp}.sslip.io";
     }
 
     public function scheduledTasks(): HasMany
