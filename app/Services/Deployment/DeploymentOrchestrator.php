@@ -377,31 +377,44 @@ class DeploymentOrchestrator
 
         $this->ssh->exec("docker network create vpsly 2>/dev/null || true");
 
-        $check = $this->ssh->exec("docker ps --format '{{.Names}}' | grep '^traefik$' || true");
-        if (empty(trim($check))) {
-            $this->streamer->log($deployment, "Installing Traefik...", LogType::INFO);
-            $command = implode(' ', [
-                'docker run -d --name traefik --restart always',
-                '--network vpsly',
-                '-p 80:80 -p 443:443',
-                '-v /var/run/docker.sock:/var/run/docker.sock:ro',
-                '-v /var/lib/vpsly/traefik/letsencrypt:/letsencrypt',
-                'traefik:v3.6',
-                '--api.insecure=true',
-                '--log.level=INFO',
-                '--providers.docker=true',
-                '--providers.docker.exposedbydefault=false',
-                '--providers.docker.network=vpsly',
-                '--entrypoints.web.address=:80',
-                '--entrypoints.web.http.redirections.entryPoint.to=websecure',
-                '--entrypoints.web.http.redirections.entryPoint.scheme=https',
-                '--entrypoints.websecure.address=:443',
-                '--certificatesresolvers.vpsly.acme.tlschallenge=true',
-                '--certificatesresolvers.vpsly.acme.email=contact@vpsly.tech',
-                '--certificatesresolvers.vpsly.acme.storage=/letsencrypt/acme.json'
-            ]);
-            $this->ssh->exec($command);
+        // Check if container exists (running OR stopped)
+        $exists = $this->ssh->exec("docker ps -a --format '{{.Names}}' | grep '^traefik$' || true");
+        
+        if (!empty(trim($exists))) {
+            // Container exists - check if it's running
+            $running = $this->ssh->exec("docker ps --format '{{.Names}}' | grep '^traefik$' || true");
+            
+            if (empty(trim($running))) {
+                // Container exists but is stopped - restart it
+                $this->streamer->log($deployment, "Traefik container exists but is stopped. Restarting...", LogType::INFO);
+                $this->ssh->exec("docker start traefik");
+            }
+            return;
         }
+
+        // No container exists - create new one
+        $this->streamer->log($deployment, "Installing Traefik...", LogType::INFO);
+        $command = implode(' ', [
+            'docker run -d --name traefik --restart always',
+            '--network vpsly',
+            '-p 80:80 -p 443:443',
+            '-v /var/run/docker.sock:/var/run/docker.sock:ro',
+            '-v /var/lib/vpsly/traefik/letsencrypt:/letsencrypt',
+            'traefik:v3.6',
+            '--api.insecure=true',
+            '--log.level=INFO',
+            '--providers.docker=true',
+            '--providers.docker.exposedbydefault=false',
+            '--providers.docker.network=vpsly',
+            '--entrypoints.web.address=:80',
+            '--entrypoints.web.http.redirections.entryPoint.to=websecure',
+            '--entrypoints.web.http.redirections.entryPoint.scheme=https',
+            '--entrypoints.websecure.address=:443',
+            '--certificatesresolvers.vpsly.acme.tlschallenge=true',
+            '--certificatesresolvers.vpsly.acme.email=contact@vpsly.tech',
+            '--certificatesresolvers.vpsly.acme.storage=/letsencrypt/acme.json'
+        ]);
+        $this->ssh->exec($command);
     }
 
     /**
